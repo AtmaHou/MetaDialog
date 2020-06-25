@@ -25,7 +25,7 @@ label_num_schema=
 dataset_lst=($2 $3)
 support_shots_lst=(3)
 
-query_set=8
+query_shot=8
 
 episode=100
 
@@ -177,7 +177,7 @@ do
                                             # model names
                                             model_name=sc.ga_${grad_acc}_ple_${ple_scale_r}.bs_${train_batch_size}.electra.${task}.sim_${similarity}.ems_${emission}_${emission_normalizer}.${use_schema}${label_num_schema}--fix_dev_spt${do_debug}
 
-                                            data_dir=${base_data_dir}${dataset}.${cross_data_id}.spt_s_${support_shots}.q_s_${query_set}.ep_${episode}${use_schema}--fix_dev_spt/
+                                            data_dir=${base_data_dir}${dataset}.${cross_data_id}.spt_s_${support_shots}.q_s_${query_shot}.ep_${episode}${use_schema}--fix_dev_spt/
                                             file_mark=${dataset}.shots_${support_shots}.cross_id_${cross_data_id}.m_seed_${seed}
                                             train_file_name=train.json
                                             dev_file_name=dev.json

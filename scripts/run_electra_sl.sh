@@ -19,7 +19,7 @@ dataset_lst=($2)
 #dataset_lst=(sf ner)
 support_shots_lst=(3)  # 1-shot
 
-query_set=4
+query_shot=4
 episode=50
 
 bio_text_omit=
@@ -175,7 +175,7 @@ do
                                                         # model names
                                                         model_name=sl.electra.dec_${decoder}.enc_${embedder}.ems_${emission}${do_div_emission}.mlp_${tap_mlp}_random_${tap_random_init_r}.e_scl_${emission_scaler}${ems_scale_r}_${emission_normalizer}.lb_${label_reps}_scl_${ple_scaler}${ple_scale_r}.t_scl_${trans_scaler}${trans_scale_r}_${trans_normalizer}.t_i_${trans_init}.${mask_trans}_.sim_${similarity}.lr_${lr}.up_lr_${upper_lr}.bs_${train_batch_size}_${test_batch_size}.sp_b_${grad_acc}.w_ep_${warmup_epoch}.ep_${epoch}--fix_dev_spt${do_debug}
 
-                                                        data_dir=${base_data_dir}${dataset}.${cross_data_id}.spt_s_${support_shots}.q_s_${query_set}.ep_${episode}${use_schema}--fix_dev_spt/
+                                                        data_dir=${base_data_dir}${dataset}.${cross_data_id}.spt_s_${support_shots}.q_s_${query_shot}.ep_${episode}${use_schema}--fix_dev_spt/
                                                         file_mark=${dataset}.shots_${support_shots}.cross_id_${cross_data_id}.m_seed_${seed}
                                                         train_file_name=train.json
                                                         dev_file_name=dev.json
