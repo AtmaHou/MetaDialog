@@ -1,6 +1,6 @@
 # Meta Dialog Platform (MDP)
 
-Meta Dialog Platform, is a tool for Few-Shot Learning. The platform now can be used for `classification` and `sequence labeling`.
+Meta Dialog Platform, is a tool for Few-Shot Learning. The platform now can be used for `classification` and `sequence labeling` and `joint learning`(which only shares embedding).
 
 As [Electra](https://openreview.net/forum?id=r1xMH1BtvB) proposed, we can use `Electra small model` to speed up our exploitation because it's so small. And if you want to get the chinese version, you can go [Chinese-Electra](https://github.com/ymcui/Chinese-ELECTRA).
 
@@ -115,18 +115,22 @@ We provide some bash scripts for convenience. As mentioned, we provide two scrip
 - sequence labeling
     - `run_electra_sl.sh`
     - `run_bert_sl.sh`
+- joint learning
+    - `run_electra_sc+sl.sh`
+    - `run_bert_sc+sl.sh`
 
 #### parameters
 
 There are many parameters to control the train & test process, but there are some main parameters you should change and know.
 - `do_debug`: set for debug model
-- `task`: specify the target task
+- `task`: specify the target task which is a list split with space(should with backslash in bash script)
+- `emission`: specify the emission choice which is a list match with task list, others is same with `task`
 - dataset name: `support_shots_lst` & `query_shot` & `episode` & `cross_id` are used for specify the dataset path
 - `embedder`: specify the embedder type, the choices are `bert` & `electra` & `sep_bert` & `glove`, in which `sep_bert` are not pair-wise embedding while others do.
 - `pretrained_model_path`: the pre-trained model path
 - `pretrained_vocab_path`: the vocabulary of pre-trained model, you can specify the file or its parent folder (default find the `vocab.txt` in it)
 - `base_data_dir`: the path of your dataset, the `base` mean that in which there are sub-folders (the sub-folders is named with `dataset name` mentioned at second item). If not, you can adjust the script.
- 
+
 
 ## Information
 

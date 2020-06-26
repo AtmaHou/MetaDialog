@@ -13,42 +13,18 @@ class FewShotLearner(torch.nn.Module):
     def __init__(self,
                  opt,
                  context_embedder: ContextEmbedderBase,
-                 # emission_scorer_map: Dict[str, EmissionScorerBase],
-                 # decoder_map: Dict[str, torch.nn.Module],
                  model_map: Dict[str, torch.nn.Module],
-                 # transition_scorer: TransitionScorerBase = None,
                  config: dict = None,  # store necessary setting or none-torch params
                  emb_log: str = None):
         super(FewShotLearner, self).__init__()
         self.opt = opt
         self.context_embedder = context_embedder
-        # self.emission_scorer_map = emission_scorer_map
-        # self.transition_scorer = transition_scorer
-        # self.decoder_map = decoder_map
         self.no_embedder_grad = opt.no_embedder_grad
         self.label_mask = None
         self.config = config
         self.emb_log = emb_log
 
-        # self.task_lst = decoder_map.keys()
         self.model_map = model_map
-        # for task in self.task_lst:
-        #     if task == 'sl':
-        #         self.model_map[task] = FewShotSeqLabeler(opt=opt,
-        #                                                  context_embedder=context_embedder,
-        #                                                  emission_scorer=emission_scorer_map[task],
-        #                                                  decoder=decoder_map[task],
-        #                                                  transition_scorer=transition_scorer,
-        #                                                  label_mask=self.label_mask,
-        #                                                  config=config,
-        #                                                  emb_log=emb_log)
-        #     elif task == 'sc':
-        #         self.model_map[task] = FewShotTextClassifier(opt=opt,
-        #                                                      context_embedder=context_embedder,
-        #                                                      emission_scorer=emission_scorer_map[task],
-        #                                                      decoder=decoder_map[task],
-        #                                                      config=config,
-        #                                                      emb_log=emb_log)
 
     def forward(
             self,
@@ -144,36 +120,12 @@ class SchemaFewShotLearner(FewShotLearner):
             self,
             opt,
             context_embedder: ContextEmbedderBase,
-            # emission_scorer_map: Dict[str, EmissionScorerBase],
-            # decoder_map: Dict[str, torch.nn.Module],
             model_map: Dict[str, torch.nn.Module],
-            # transition_scorer: TransitionScorerBase = None,
             config: dict = None,  # store necessary setting or none-torch params
             emb_log: str = None
     ):
-        # super(SchemaFewShotLearner, self).__init__(
-        #     opt, context_embedder, emission_scorer_map, decoder_map, transition_scorer, config, emb_log)
         super(SchemaFewShotLearner, self).__init__(opt, context_embedder, model_map, config, emb_log)
-
-        # self.task_lst = decoder_map.keys()
         self.model_map = model_map
-        # for task in self.task_lst:
-        #     if task == 'sl':
-        #         self.model_map[task] = SchemaFewShotSeqLabeler(opt=opt,
-        #                                                        context_embedder=context_embedder,
-        #                                                        emission_scorer=emission_scorer_map[task],
-        #                                                        decoder=decoder_map[task],
-        #                                                        transition_scorer=transition_scorer,
-        #                                                        label_mask=self.label_mask,
-        #                                                        config=config,
-        #                                                        emb_log=emb_log)
-        #     elif task == 'sc':
-        #         self.model_map[task] = SchemaFewShotTextClassifier(opt=opt,
-        #                                                            context_embedder=context_embedder,
-        #                                                            emission_scorer=emission_scorer_map[task],
-        #                                                            decoder=decoder_map[task],
-        #                                                            config=config,
-        #                                                            emb_log=emb_log)
 
     def forward(
             self,

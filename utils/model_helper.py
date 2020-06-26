@@ -118,7 +118,6 @@ def make_model(opt, config):
 
     ''' Build decoder '''
     model_map = {}
-    decoder_map = {}
     transition_scorer = None
     if 'sl' in opt.task:  # for sequence labeling
         if opt.decoder == 'sms':
@@ -156,7 +155,6 @@ def make_model(opt, config):
         else:
             raise TypeError('wrong component type')
 
-        # decoder_map['sl'] = decoder
         seq_laber = SchemaFewShotSeqLabeler if opt.use_schema else FewShotSeqLabeler
         model_map['sl'] = seq_laber(opt=opt,
                                     context_embedder=context_embedder,
@@ -168,7 +166,6 @@ def make_model(opt, config):
 
     if 'sc' in opt.task:  # for single-label text classification task
         decoder = SingleLabelTextClassifier()
-        # decoder_map['sc'] = decoder
         text_classifier = SchemaFewShotTextClassifier if opt.use_schema else FewShotTextClassifier
         model_map['sc'] = text_classifier(opt=opt,
                                           context_embedder=context_embedder,
@@ -182,9 +179,6 @@ def make_model(opt, config):
     model = few_shot_learner(
         opt=opt,
         context_embedder=context_embedder,
-        # emission_scorer_map=emission_scorer_map,
-        # decoder_map=decoder_map,
-        # transition_scorer=transition_scorer,
         model_map=model_map,
         config=config,
         emb_log=emb_log
