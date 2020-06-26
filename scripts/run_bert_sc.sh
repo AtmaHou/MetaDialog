@@ -11,7 +11,7 @@ do_debug=--do_debug
 #restore=--restore_cpt
 restore=
 
-task=sc
+task=sc\ sl
 #task=sl
 
 use_schema=--use_schema

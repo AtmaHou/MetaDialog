@@ -7,24 +7,20 @@ import time
 import os
 import copy
 from transformers import AdamW, get_linear_schedule_with_warmup
-from pytorch_pretrained_bert.optimization import BertAdam
 from tqdm import tqdm, trange
 from torch.utils.data import TensorDataset, DataLoader, RandomSampler, SequentialSampler
 from torch.utils.data.distributed import DistributedSampler
 # My Staff
 from utils.iter_helper import PadCollate, FewShotDataset, SimilarLengthSampler
 from utils.preprocessor import FewShotFeature, ModelInput
-from utils.device_helper import prepare_model
 from utils.model_helper import make_model, load_model
-from models.few_shot_seq_labeler import FewShotSeqLabeler
+from models.few_shot_learner import FewShotLearner
 
 
 logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
     datefmt='%m/%d/%Y %H:%M:%S',
     level=logging.INFO,
-    # stream=sys.stderr
-    # stream=sys.stdout
 )
 logger = logging.getLogger(__name__)
 
@@ -75,8 +71,8 @@ class TrainerBase:
         self.n_gpu = n_gpu
 
     def do_train(self, model, train_features, num_train_epochs,
-                 dev_features=None, dev_id2label=None,
-                 test_features=None, test_id2label=None,
+                 dev_features=None, dev_id2label_map=None,
+                 test_features=None, test_id2label_map=None,
                  best_dev_score_now=0):
         """
         do training and dev model selection
@@ -100,7 +96,7 @@ class TrainerBase:
         total_step = 0
         best_dev_score_now = best_dev_score_now
         best_model_now = model
-        test_score = None
+        test_score_map = None
         min_loss = 100000000000000
         loss_now = 0
         no_new_best_dev_num = 0
@@ -115,7 +111,9 @@ class TrainerBase:
         for epoch_id in trange(int(num_train_epochs), desc="Epoch"):
             for step, batch in enumerate(tqdm(data_loader, desc="Train-Batch Progress")):
                 if self.n_gpu == 1:
-                    batch = tuple(t.to(self.device) for t in batch)  # multi-gpu does scattering it-self
+                    # multi-gpu does scattering it-self
+                    batch = tuple(t.to(self.device) if not isinstance(t, dict)
+                                  else {task: item.to(self.device) for task, item in t.items()} for t in batch)
                 ''' loss '''
                 loss = self.do_forward(batch, model, epoch_id, step)
                 loss = self.process_special_loss(loss)  # for parallel process, split batch and so on
@@ -131,11 +129,11 @@ class TrainerBase:
                 if self.time_to_make_check_point(total_step, data_loader):
                     if self.tester and self.opt.eval_when_train:  # this is not suit for training big model
                         print("Start dev eval.")
-                        dev_score, test_score, copied_best_model = self.model_selection(
-                            model, best_dev_score_now, dev_features, dev_id2label, test_features, test_id2label)
+                        dev_score_map, test_score_map, copied_best_model = self.model_selection(
+                            model, best_dev_score_now, dev_features, dev_id2label_map, test_features, test_id2label_map)
 
-                        if dev_score > best_dev_score_now:
-                            best_dev_score_now = dev_score
+                        if self.is_bigger(dev_score_map, best_dev_score_now):
+                            best_dev_score_now = dev_score_map
                             best_model_now = copied_best_model
                             no_new_best_dev_num = 0
                         else:
@@ -168,7 +166,7 @@ class TrainerBase:
                 break
             print(" --- The {} epoch Finish --- ".format(epoch_id))
 
-        return best_model_now, best_dev_score_now, test_score
+        return best_model_now, best_dev_score_now, test_score_map
 
     def time_to_make_check_point(self, step, data_loader):
         interval_size = int(len(data_loader) / self.opt.cpt_per_epoch)
@@ -248,20 +246,40 @@ class TrainerBase:
             time.sleep(300)
             self.make_check_point_(model, step)
 
-    def model_selection(self, model, best_score, dev_features, dev_id2label, test_features=None, test_id2label=None):
+    def is_bigger(self, first_score: Dict[str, float], second_score: Dict[str, float],
+                  task_weight: Dict[str, float] = None)->bool:
+        task_lst = first_score.keys()
+        if isinstance(second_score, dict):
+            assert task_lst == second_score.keys(), "the two scores should have same keys"
+        elif isinstance(second_score, int) or isinstance(second_score, float):
+            second_score = {task: second_score for task in task_lst}
+        else:
+            raise TypeError('the second_score should be int or a dict to assign every task a int or float value')
+
+        if task_weight:
+            assert sum(task_weight.values()) == 1.0, "the weight for all tasks should sum to 1"
+        else:
+            task_weight = {task: 1.0 / len(task_lst) for task in task_lst}
+
+        first_avg_score = [score * task_weight[task] for task, score in first_score.items()]
+        second_avg_score = [score * task_weight[task] for task, score in second_score.items()]
+
+        return first_avg_score > second_avg_score
+
+    def model_selection(self, model, best_score, dev_features, dev_id2label_map, test_features=None, test_id2label_map=None):
         """ do model selection during training"""
         print("Start dev model selection.")
         # do dev eval at every dev_interval point and every end of epoch
-        dev_model = self.tester.clone_model(model, dev_id2label)  # copy reusable params, for a different domain
-        if self.opt.mask_transition and self.opt.task == 'sl':
-            dev_model.label_mask = self.opt.dev_label_mask.to(self.device)
+        dev_model = self.tester.clone_model(model, dev_id2label_map)  # copy reusable params, for a different domain
+        if self.opt.mask_transition and 'sl' in self.opt.task:
+            dev_model.model_map['sl'].label_mask = self.opt.dev_label_mask.to(self.device)
 
-        dev_score = self.tester.do_test(dev_model, dev_features, dev_id2label, log_mark='dev_pred')
-        logger.info("  dev score(F1) = {}".format(dev_score))
-        print("  dev score(F1) = {}".format(dev_score))
+        dev_score_map = self.tester.do_test(dev_model, dev_features, dev_id2label_map, log_mark='dev_pred')
+        logger.info("  dev score(F1) = {}".format(dev_score_map))
+        print("  dev score(F1) = {}".format(dev_score_map))
         best_model = None
-        test_score = None
-        if dev_score > best_score:
+        test_score_map = None
+        if self.is_bigger(dev_score_map, best_score):
             logger.info(" === Found new best!! === ")
             ''' store new best model  '''
             best_model = self.clone_model(model)  # copy model to avoid writen by latter training
@@ -271,16 +289,17 @@ class TrainerBase:
 
             ''' get current best model's test score '''
             if test_features:
-                test_model = self.tester.clone_model(model, test_id2label)  # copy reusable params for different domain
-                if self.opt.mask_transition and self.opt.task == 'sl':
-                    test_model.label_mask = self.opt.test_label_mask.to(self.device)
+                # copy reusable params for different domain
+                test_model = self.tester.clone_model(model, test_id2label_map)
+                if self.opt.mask_transition and 'sl' in self.opt.task:
+                    test_model.model_map['sl'].label_mask = self.opt.test_label_mask.to(self.device)
 
-                test_score = self.tester.do_test(test_model, test_features, test_id2label, log_mark='test_pred')
-                logger.info("  test score(F1) = {}".format(test_score))
-                print("  test score(F1) = {}".format(test_score))
+                test_score_map = self.tester.do_test(test_model, test_features, test_id2label_map, log_mark='test_pred')
+                logger.info("  test score(F1) = {}".format(test_score_map))
+                print("  test score(F1) = {}".format(test_score_map))
         # reset the model status
         model.train()
-        return dev_score, test_score, best_model
+        return dev_score_map, test_score_map, best_model
 
     def check_point_content(self, model):
         """ necessary staff for rebuild the model """
@@ -288,7 +307,8 @@ class TrainerBase:
         return model.state_dict()
 
     def select_model_from_check_point(
-            self, train_id2label, dev_features, dev_id2label, test_features=None, test_id2label=None, rm_cpt=True):
+            self, train_id2label_map, dev_features, dev_id2label_map,
+            test_features=None, test_id2label_map=None, rm_cpt=True):
         all_cpt_file = list(filter(lambda x: '.cpt.pl' in x, os.listdir(self.opt.output_dir)))
         best_score = 0
         test_score_then = 0
@@ -297,11 +317,11 @@ class TrainerBase:
         for cpt_file in all_cpt_file:
             logger.info('testing check point: {}'.format(cpt_file))
             model = load_model(os.path.join(self.opt.output_dir, cpt_file))
-            dev_score, test_score, copied_model = self.model_selection(
-                model, best_score, dev_features, dev_id2label, test_features, test_id2label)
-            if dev_score > best_score:
-                best_score = dev_score
-                test_score_then = test_score
+            dev_score_map, test_score_map, copied_model = self.model_selection(
+                model, best_score, dev_features, dev_id2label_map, test_features, test_id2label_map)
+            if self.is_bigger(dev_score_map, best_score):
+                best_score = dev_score_map
+                test_score_then = test_score_map
                 best_model = copied_model
         if rm_cpt:  # delete all check point
             for cpt_file in all_cpt_file:
@@ -400,8 +420,8 @@ class FewShotTrainer(TrainerBase):
             feature.support_input.input_mask,
             feature.support_input.output_mask,
             # target
-            feature.test_target,
-            feature.support_target,
+            feature.test_target_map,
+            feature.support_target_map,
             # Special
             torch.LongTensor([len(feature.support_feature_items)]),  # support num
         ]
@@ -462,8 +482,8 @@ class FewShotTrainer(TrainerBase):
 
     def clone_model(self, model):
         # deal with data parallel model
-        best_model: FewShotSeqLabeler
-        old_model: FewShotSeqLabeler
+        best_model: FewShotLearner
+        old_model: FewShotLearner
         if self.opt.local_rank != -1 or self.n_gpu > 1:  # the model is parallel class here
             old_model = model.module
         else:
@@ -490,30 +510,30 @@ class SchemaFewShotTrainer(FewShotTrainer):
 
     def unpack_feature(self, feature: FewShotFeature) -> List[torch.Tensor]:
         ret = [
-            torch.LongTensor([feature.gid]),
+            torch.LongTensor([feature.gid]),  # 0
             # test
-            feature.test_input.token_ids,
-            feature.test_input.segment_ids,
-            feature.test_input.nwp_index,
-            feature.test_input.input_mask,
-            feature.test_input.output_mask,
+            feature.test_input.token_ids,  # 1
+            feature.test_input.segment_ids,  # 2
+            feature.test_input.nwp_index,  # 3
+            feature.test_input.input_mask,  # 4
+            feature.test_input.output_mask_map,  # 5
             # support
-            feature.support_input.token_ids,
-            feature.support_input.segment_ids,
-            feature.support_input.nwp_index,
-            feature.support_input.input_mask,
-            feature.support_input.output_mask,
+            feature.support_input.token_ids,  # 6
+            feature.support_input.segment_ids,  # 7
+            feature.support_input.nwp_index,  # 8
+            feature.support_input.input_mask,  # 9
+            feature.support_input.output_mask_map,  # 10
             # target
-            feature.test_target,
-            feature.support_target,
+            feature.test_target_map,  # 11
+            feature.support_target_map,  # 12
             # Special
-            torch.LongTensor([len(feature.support_feature_items)]),  # support num
+            torch.LongTensor([len(feature.support_feature_items)]),  # 13, support num
             # label feature
-            feature.label_input.token_ids,
-            feature.label_input.segment_ids,
-            feature.label_input.nwp_index,
-            feature.label_input.input_mask,
-            feature.label_input.output_mask,
+            {key: label_input.token_ids for key, label_input in feature.label_input_map.items()},  # 14
+            {key: label_input.segment_ids for key, label_input in feature.label_input_map.items()},  # 15
+            {key: label_input.nwp_index for key, label_input in feature.label_input_map.items()},  # 16
+            {key: label_input.input_mask for key, label_input in feature.label_input_map.items()},  # 17
+            {key: label_input.output_mask_map for key, label_input in feature.label_input_map.items()},  # 18
         ]
         return ret
 

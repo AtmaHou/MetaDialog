@@ -40,7 +40,10 @@ def prepare_model(args, model, device, n_gpu):
     """ Set device to use """
     if args.fp16:
         model.half()
+    # TODO: smarter way
     model.to(device)
+    for task in model.model_map.keys():
+        model.model_map[task].to(device)
     if args.local_rank != -1:
         model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.local_rank],
                                                           output_device=args.local_rank)

@@ -264,7 +264,6 @@ class BertSchemaContextEmbedder(BertContextEmbedder):
     def get_label_reps(self, test_token_ids, test_segment_ids, test_nwp_index, test_input_mask):
         batch_size = test_token_ids.shape[0]
         if self.opt.label_reps == 'cat':
-            # todo: use label mask to represent a label with only in domain info
             reps = self.single_reps(test_token_ids, test_segment_ids, test_nwp_index, test_input_mask, )
         elif self.opt.label_reps in ['sep', 'sep_sum']:
             input_ids, segment_ids, input_mask = self.flatten_input(test_token_ids, test_segment_ids,
@@ -280,7 +279,6 @@ class BertSchemaContextEmbedder(BertContextEmbedder):
             elif self.opt.label_reps == 'sep_sum':  # average all label reps as reps
                 reps = sequence_output
                 emb_mask = self.expand_mask(test_input_mask, 2, reps_size)
-                # todo: use mask to get sum of single embedding
                 raise NotImplementedError
             else:
                 raise ValueError("Wrong label_reps choice ")

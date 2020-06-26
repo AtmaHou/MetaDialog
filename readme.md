@@ -70,7 +70,7 @@ There are some params for you to control the generation process:
 
 ##### few-shot/meta-episode style
 
-```json
+```
 {
   "domain_name": [
     {  // episode
@@ -130,4 +130,4 @@ There are many parameters to control the train & test process, but there are som
 
 ## Information
 
-The platform is developed by [HIT-SCIR](http://ir.hit.edu.cn/). If you have any question and advice for it, please contact us(Yutai Hou - [ythou@ir.hit.edu.cn]() or Yongkui Lai - [yklai@ir.hit.edu.cn]()).
+The platform is developed by [HIT-SCIR](http://ir.hit.edu.cn/). If you have any question and advice for it, please contact us(Yutai Hou - [ythou@ir.hit.edu.cn](mailto:ythou@ir.hit.edu.cn) or Yongkui Lai - [yklai@ir.hit.edu.cn](mailto:yklai@ir.hit.edu.cn)).

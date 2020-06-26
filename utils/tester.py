@@ -16,8 +16,7 @@ from utils.iter_helper import PadCollate, FewShotDataset
 from utils.preprocessor import FewShotFeature, ModelInput
 from utils.device_helper import prepare_model
 from utils.model_helper import make_model, load_model
-from models.modules.transition_scorer import FewShotTransitionScorer
-from models.few_shot_seq_labeler import FewShotSeqLabeler
+from models.few_shot_learner import FewShotLearner
 
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
@@ -48,25 +47,32 @@ class TesterBase:
         self.device = device
         self.n_gpu = n_gpu
 
-    def do_test(self, model: torch.nn.Module, test_features: List[FewShotFeature], id2label: dict,
-                log_mark: str = 'test_pred'):
+    def do_test(self, model: torch.nn.Module, test_features: List[FewShotFeature], id2label_map: dict,
+                log_mark: str = 'test_pred')->Dict[str, float]:
         logger.info("***** Running eval *****")
         # print("***** Running eval *****")
         logger.info("  Num features = %d", len(test_features))
         logger.info("  Batch size = %d", self.batch_size)
-        all_results = []
+        task_lst = id2label_map.keys()
+        all_results = []  # {task: [] for task in task_lst}
 
         model.eval()
         data_loader = self.get_data_loader(test_features)
 
         for batch in tqdm(data_loader, desc="Eval-Batch Progress"):
-            batch = tuple(t.to(self.device) for t in batch)  # multi-gpu does scattering it-self
+            if self.n_gpu == 1:
+                # multi-gpu does scattering it-self
+                batch = tuple(t.to(self.device) if not isinstance(t, dict)
+                              else {task: item.to(self.device) for task, item in t.items()} for t in batch)
             with torch.no_grad():
                 predictions = self.do_forward(batch, model)
             for i, feature_gid in enumerate(batch[0]):  # iter over feature global id
-                prediction = predictions[i]
-                feature = test_features[feature_gid.item()]
-                all_results.append(RawResult(feature=feature, prediction=prediction))
+                tmp_dict = {}
+                for task in task_lst:
+                    prediction = predictions[task][i]
+                    feature = test_features[feature_gid.item()]
+                    tmp_dict[task] = RawResult(feature=feature, prediction=prediction)
+                all_results.append(tmp_dict)
                 if model.emb_log:
                     model.emb_log.write('text_' + str(feature_gid.item()) + '\t'
                                         + '\t'.join(feature.test_feature_item.data_item.seq_in) + '\n')
@@ -75,8 +81,8 @@ class TesterBase:
         if model.emb_log:
             model.emb_log.close()
 
-        scores = self.eval_predictions(all_results, id2label, log_mark)
-        return scores
+        scores_map = self.eval_predictions(all_results, id2label_map, log_mark)
+        return scores_map
 
     def get_data_loader(self, features):
         dataset = TensorDataset([self.unpack_feature(f) for f in features])
@@ -122,26 +128,35 @@ class FewShotTester(TesterBase):
         data_loader = DataLoader(dataset, sampler=sampler, batch_size=self.batch_size, collate_fn=pad_collate)
         return data_loader
 
-    def eval_predictions(self, all_results: List[RawResult], id2label: dict, log_mark: str) -> float:
+    def eval_predictions(self, all_results: List[Dict[str, RawResult]], id2label_map: Dict[str, Dict[int, str]],
+                         log_mark: str) -> Dict[str, float]:
         """ Our result score is average score of all few-shot batches. """
         all_batches = self.reform_few_shot_batch(all_results)
         all_scores = []
         for b_id, fs_batch in all_batches:
-            f1 = self.eval_one_few_shot_batch(b_id, fs_batch, id2label, log_mark)
-            all_scores.append(f1)
-        return sum(all_scores) * 1.0 / len(all_scores)
+            f1_map = self.eval_one_few_shot_batch(b_id, fs_batch, id2label_map, log_mark)
+            all_scores.append(f1_map)
+        return {task: sum([item[task] for item in all_scores]) * 1.0 / len(all_scores) for task in id2label_map.keys()}
 
-    def eval_one_few_shot_batch(self, b_id, fs_batch: List[RawResult], id2label: dict, log_mark: str) -> float:
-        pred_file_name = '{}.{}.txt'.format(log_mark, b_id)
-        output_prediction_file = os.path.join(self.opt.output_dir, pred_file_name)
-        if self.opt.task == 'sl':
-            self.writing_sl_prediction(fs_batch, output_prediction_file, id2label)
+    def eval_one_few_shot_batch(self, b_id, fs_batch: List[Dict[str, RawResult]], id2label_map: Dict[str, Dict[int, str]],
+                                log_mark: str) -> Dict[str, float]:
+        f1_map = {}
+        if 'sl' in self.opt.task:
+            pred_file_name = 'sl.{}.{}.txt'.format(log_mark, b_id)
+            output_prediction_file = os.path.join(self.opt.output_dir, pred_file_name)
+            sl_fs_batch = [item['sl'] for item in fs_batch]
+            self.writing_sl_prediction(sl_fs_batch, output_prediction_file, id2label_map['sl'])
             precision, recall, f1 = self.eval_with_script(output_prediction_file)
-        elif self.opt.task == 'sc':
-            precision, recall, f1 = self.writing_sc_prediction(fs_batch, output_prediction_file, id2label)
-        else:
-            raise ValueError("Wrong task.")
-        return f1
+            f1_map['sl'] = f1
+
+        if 'sc' in self.opt.task:
+            pred_file_name = 'sc.{}.{}.txt'.format(log_mark, b_id)
+            output_prediction_file = os.path.join(self.opt.output_dir, pred_file_name)
+            sc_fs_batch = [item['sc'] for item in fs_batch]
+            precision, recall, f1 = self.writing_sc_prediction(sc_fs_batch, output_prediction_file, id2label_map['sc'])
+            f1_map['sc'] = f1
+
+        return f1_map
 
     def writing_sc_prediction(self, fs_batch: List[RawResult], output_prediction_file: str, id2label: dict):
         tp, fp, fn = 0, 0, 0
@@ -212,14 +227,17 @@ class FewShotTester(TesterBase):
         f1 = float(std_results[7].replace('%;', '').replace("\\n'", ''))
         return precision, recall, f1
 
-    def reform_few_shot_batch(self, all_results: List[RawResult]) -> List[List[Tuple[int, RawResult]]]:
+    def reform_few_shot_batch(self, all_results: List[Dict[str, RawResult]]
+                              ) -> List[List[Tuple[int, Dict[str, RawResult]]]]:
         """
         Our result score is average score of all few-shot batches.
         So here, we classify all result according to few-shot batch id.
         """
         all_batches = {}
+        task_lst = all_results[0].keys()
+        has_task = list(task_lst)[0]
         for result in all_results:
-            b_id = result.feature.batch_gid
+            b_id = result[has_task].feature.batch_gid
             if b_id not in all_batches:
                 all_batches[b_id] = [result]
             else:
@@ -242,8 +260,8 @@ class FewShotTester(TesterBase):
             feature.support_input.input_mask,
             feature.support_input.output_mask,
             # target
-            feature.test_target,
-            feature.support_target,
+            feature.test_target_map,
+            feature.support_target_map,
             # Special
             torch.LongTensor([len(feature.support_feature_items)]),  # support num
         ]
@@ -268,7 +286,6 @@ class FewShotTester(TesterBase):
         ) = batch
 
         prediction = model(
-        # loss, prediction = model(
             test_token_ids,
             test_segment_ids,
             test_nwp_index,
@@ -292,19 +309,19 @@ class FewShotTester(TesterBase):
                 return v
         return []
 
-    def clone_model(self, model, id2label):
+    def clone_model(self, model, id2label_map):
         """ clone only part of params """
         # deal with data parallel model
-        new_model: FewShotSeqLabeler
-        old_model: FewShotSeqLabeler
+        new_model: FewShotLearner
+        old_model: FewShotLearner
         if self.opt.local_rank != -1 or self.n_gpu > 1 and hasattr(model, 'module'):  # the model is parallel class here
             old_model = model.module
         else:
             old_model = model
-        emission_dict = old_model.emission_scorer.state_dict()
-        old_num_tags = len(self.get_value_from_order_dict(emission_dict, 'label_reps'))
+        # emission_dict = old_model.emission_scorer.state_dict()
+        # old_num_tags = len(self.get_value_from_order_dict(emission_dict, 'label_reps'))
 
-        config = {'num_tags': len(id2label), 'id2label': id2label}
+        config = {'num_tags': len(id2label_map['sl']) if 'sl' in id2label_map else 0, 'id2label_map': id2label_map}
         if 'num_anchors' in old_model.config:
             config['num_anchors'] = old_model.config['num_anchors']  # Use previous model's random anchors.
         # get a new instance for different domain
@@ -315,13 +332,14 @@ class FewShotTester(TesterBase):
         else:
             sub_new_model = new_model
         ''' copy weights and stuff '''
-        if old_model.opt.task == 'sl' and old_model.transition_scorer:
+        if 'sl' in old_model.opt.task and old_model.model_map['sl'].transition_scorer:
             # copy one-by-one because target transition and decoder will be left un-assigned
             sub_new_model.context_embedder.load_state_dict(old_model.context_embedder.state_dict())
-            sub_new_model.emission_scorer.load_state_dict(old_model.emission_scorer.state_dict())
+            sub_new_model.model_map['sl'].emission_scorer.load_state_dict(
+                old_model.model_map['sl'].emission_scorer.state_dict())
             for param_name in ['backoff_trans_mat', 'backoff_start_trans_mat', 'backoff_end_trans_mat']:
-                sub_new_model.transition_scorer.state_dict()[param_name].copy_(
-                    old_model.transition_scorer.state_dict()[param_name].data)
+                sub_new_model.model_map['sl'].transition_scorer.state_dict()[param_name].copy_(
+                    old_model.model_map['sl'].transition_scorer.state_dict()[param_name].data)
         else:
             sub_new_model.load_state_dict(old_model.state_dict())
 
@@ -345,30 +363,30 @@ class SchemaFewShotTester(FewShotTester):
 
     def unpack_feature(self, feature: FewShotFeature) -> List[torch.Tensor]:
         ret = [
-            torch.LongTensor([feature.gid]),
+            torch.LongTensor([feature.gid]),  # 1
             # test
-            feature.test_input.token_ids,
-            feature.test_input.segment_ids,
-            feature.test_input.nwp_index,
-            feature.test_input.input_mask,
-            feature.test_input.output_mask,
+            feature.test_input.token_ids,  # 2
+            feature.test_input.segment_ids,  # 3
+            feature.test_input.nwp_index,  # 4
+            feature.test_input.input_mask,  # 5
+            feature.test_input.output_mask_map,  # 6
             # support
-            feature.support_input.token_ids,
-            feature.support_input.segment_ids,
-            feature.support_input.nwp_index,
-            feature.support_input.input_mask,
-            feature.support_input.output_mask,
+            feature.support_input.token_ids,  # 7
+            feature.support_input.segment_ids,  # 8
+            feature.support_input.nwp_index,  # 9
+            feature.support_input.input_mask,  # 10
+            feature.support_input.output_mask_map,  # 11
             # target
-            feature.test_target,
-            feature.support_target,
+            feature.test_target_map,  # 11
+            feature.support_target_map,  # 12
             # Special
-            torch.LongTensor([len(feature.support_feature_items)]),  # support num
+            torch.LongTensor([len(feature.support_feature_items)]),  # 13, support num
             # label feature
-            feature.label_input.token_ids,
-            feature.label_input.segment_ids,
-            feature.label_input.nwp_index,
-            feature.label_input.input_mask,
-            feature.label_input.output_mask,
+            {key: label_input.token_ids for key, label_input in feature.label_input_map.items()},  # 14
+            {key: label_input.segment_ids for key, label_input in feature.label_input_map.items()},  # 15
+            {key: label_input.nwp_index for key, label_input in feature.label_input_map.items()},  # 16
+            {key: label_input.input_mask for key, label_input in feature.label_input_map.items()},  # 17
+            {key: label_input.output_mask_map for key, label_input in feature.label_input_map.items()},  # 18
         ]
         return ret
 
@@ -420,17 +438,17 @@ class SchemaFewShotTester(FewShotTester):
         return prediction
 
 
-def eval_check_points(opt, tester, test_features, test_id2label, device):
+def eval_check_points(opt, tester, test_features, test_id2label_map, device):
     all_cpt_file = list(filter(lambda x: '.cpt.pl' in x, os.listdir(opt.saved_model_path)))
     all_cpt_file = sorted(all_cpt_file,
                           key=lambda x: int(x.replace('model.step', '').replace('.cpt.pl', '')))
     max_score = 0
     for cpt_file in all_cpt_file:
         cpt_model = load_model(os.path.join(opt.saved_model_path, cpt_file))
-        testing_model = tester.clone_model(cpt_model, test_id2label)
-        if opt.mask_transition and opt.task == 'sl':
+        testing_model = tester.clone_model(cpt_model, test_id2label_map)
+        if opt.mask_transition and 'sl' in opt.task:
             testing_model.label_mask = opt.test_label_mask.to(device)
-        test_score = tester.do_test(testing_model, test_features, test_id2label, log_mark='test_pred')
+        test_score = tester.do_test(testing_model, test_features, test_id2label_map, log_mark='test_pred')
         if test_score > max_score:
             max_score = test_score
         logger.info('cpt_file:{} - test:{}'.format(cpt_file, test_score))

@@ -110,17 +110,6 @@ class FewShotRawDataLoader(RawDataLoaderBase):
     def get_data_items(self, parts: dict) -> List[DataItem]:
         data_item_lst = []
         for seq_in, seq_out, label in zip(parts['seq_ins'], parts['seq_outs'], parts['labels']):
-            # todo: move word-piecing into preprocessing module
-            # label = token_label if self.opt.task == 'ml' else sent_label   # decide label type according to task
             data_item = DataItem(seq_in=seq_in, seq_out=seq_out, label=label)
             data_item_lst.append(data_item)
         return data_item_lst
-
-    # def get_data_items(self, parts: dict) -> List[DataItem]:
-    #     data_item_lst = []
-    #     for text, label, wp_text, wp_label, wp_mark in zip(
-    #             parts['seq_ins'], parts['seq_outs'],
-    #             parts['tokenized_texts'], parts['word_piece_labels'], parts['word_piece_marks']):
-    #         data_item = DataItem(text=text, label=label, wp_text=wp_text, wp_label=wp_label, wp_mark=wp_mark)
-    #         data_item_lst.append(data_item)
-    #     return data_item_lst

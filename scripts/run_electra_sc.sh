@@ -14,6 +14,7 @@ restore=
 task=sc
 #task=sl
 
+
 use_schema=--use_schema
 #use_schema=
 
@@ -147,8 +148,11 @@ emb_log=
 # electra small path
 pretrained_model_path=/users4/yklai/corpus/electra/chinese_electra_small_discriminator
 pretrained_vocab_path=/users4/yklai/corpus/electra/chinese_electra_small_discriminator
+#pretrained_model_path=/Users/lyk/Code/model/chinese_electra_small_discriminator_pytorch
+#pretrained_vocab_path=/Users/lyk/Code/model/chinese_electra_small_discriminator_pytorch
 
 base_data_dir=/users4/yklai/code/Dialogue/FewShot/MetaDial/data/SmpMetaData/
+#base_data_dir=/Users/lyk/Work/Dialogue/FewShot/SMP/smp2/
 
 echo [START] set jobs on dataset [ ${dataset_lst[@]} ] on gpu [ ${gpu_list} ]
 # === Loop for all case and run ===
@@ -188,7 +192,7 @@ do
                                             echo Task:  ${file_mark}
                                             echo [CLI]
                                             export OMP_NUM_THREADS=2  # threads num for each task
-                                            CUDA_VISIBLE_DEVICES=${gpu_list} python main.py ${do_debug} \
+                                            CUDA_VISIBLE_DEVICES=${gpu_list} python3 main.py ${do_debug} \
                                                 --task ${task} \
                                                 --seed ${seed} \
                                                 --do_train \
@@ -229,7 +233,7 @@ do
                                                 ${emb_log} \
                                                 ${do_div_emission} \
                                                 --transition learn \
-                                                --load_feature > ./sclog/${model_name}.DATA.${file_mark}.log
+                                                --load_feature  > ./sclog/${model_name}.DATA.${file_mark}.log
                                             echo [CLI]
                                             echo Model: ${model_name}
                                             echo Task:  ${file_mark}

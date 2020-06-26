@@ -19,11 +19,10 @@ from models.modules.seq_labeler import SequenceLabeler, RuleSequenceLabeler
 from models.modules.text_classifier import SingleLabelTextClassifier
 from models.modules.conditional_random_field import ConditionalRandomField, allowed_transitions
 
+from models.few_shot_learner import FewShotLearner, SchemaFewShotLearner
 from models.few_shot_seq_labeler import FewShotSeqLabeler, SchemaFewShotSeqLabeler
 from models.few_shot_text_classifier import FewShotTextClassifier, SchemaFewShotTextClassifier
-
 from models.modules.scale_controller import build_scale_controller, ScaleControllerBase
-
 from utils.device_helper import prepare_model
 
 
@@ -67,8 +66,8 @@ def make_model(opt, config):
     ''' Create log file to record testing data '''
     if opt.emb_log:
         emb_log = open(os.path.join(opt.output_dir, 'emb.log'), 'w')
-        if 'id2label' in config:
-            emb_log.write('id2label\t' + '\t'.join([str(k) + ':' + str(v) for k, v in config['id2label'].items()]) + '\n')
+        if 'id2label_map' in config:
+            emb_log.write('id2label_map\t' + '\t'.join([str(k) + ':' + str(v) for k, v in config['id2label_map'].items()])+'\n')
     else:
         emb_log = None
 
@@ -86,38 +85,45 @@ def make_model(opt, config):
     else:
         raise TypeError('wrong component type')
 
-    if opt.emission == 'mnet':
-        similarity_scorer = MatchingSimilarityScorer(sim_func=sim_func, emb_log=emb_log)
-        emission_scorer = MNetEmissionScorer(similarity_scorer, ems_scaler, opt.div_by_tag_num)
-    elif opt.emission == 'proto':
-        similarity_scorer = PrototypeSimilarityScorer(sim_func=sim_func, emb_log=emb_log)
-        emission_scorer = PrototypeEmissionScorer(similarity_scorer, ems_scaler)
-    elif opt.emission == 'proto_with_label':
-        similarity_scorer = ProtoWithLabelSimilarityScorer(sim_func=sim_func, scaler=opt.ple_scale_r, emb_log=emb_log)
-        emission_scorer = ProtoWithLabelEmissionScorer(similarity_scorer, ems_scaler)
-    elif opt.emission == 'tapnet':
-        # set num of anchors:
-        # (1) if provided in config, use it (usually in load model case.)
-        # (2) *3 is used to ensure enough anchors ( > num_tags of unseen domains )
-        num_anchors = config['num_anchors'] if 'num_anchors' in config else config['num_tags'] * 3
-        config['num_anchors'] = num_anchors
-        anchor_dim = 256 if opt.context_emb == 'electra' else 768
-        similarity_scorer = TapNetSimilarityScorer(
-            sim_func=sim_func, num_anchors=num_anchors, mlp_out_dim=opt.tap_mlp_out_dim,
-            random_init=opt.tap_random_init, random_init_r=opt.tap_random_init_r,
-            mlp=opt.tap_mlp, emb_log=emb_log, tap_proto=opt.tap_proto, tap_proto_r=opt.tap_proto_r,
-            anchor_dim=anchor_dim)
-        emission_scorer = TapNetEmissionScorer(similarity_scorer, ems_scaler)
-    else:
-        raise TypeError('wrong component type')
+    assert len(opt.emission) == len(opt.task), "the emission list should match with task list"
+
+    emission_scorer_map = {}
+    for task, emission in zip(opt.task, opt.emission):
+        if emission == 'mnet':
+            similarity_scorer = MatchingSimilarityScorer(sim_func=sim_func, emb_log=emb_log)
+            emission_scorer = MNetEmissionScorer(similarity_scorer, ems_scaler, opt.div_by_tag_num)
+        elif emission == 'proto':
+            similarity_scorer = PrototypeSimilarityScorer(sim_func=sim_func, emb_log=emb_log)
+            emission_scorer = PrototypeEmissionScorer(similarity_scorer, ems_scaler)
+        elif emission == 'proto_with_label':
+            similarity_scorer = ProtoWithLabelSimilarityScorer(sim_func=sim_func, scaler=opt.ple_scale_r, emb_log=emb_log)
+            emission_scorer = ProtoWithLabelEmissionScorer(similarity_scorer, ems_scaler)
+        elif emission == 'tapnet':
+            # set num of anchors:
+            # (1) if provided in config, use it (usually in load model case.)
+            # (2) *3 is used to ensure enough anchors ( > num_tags of unseen domains )
+            print('config: {}'.format(config))
+            num_anchors = config['num_anchors'] if 'num_anchors' in config else config['num_tags'] * 3
+            config['num_anchors'] = num_anchors
+            anchor_dim = 256 if opt.context_emb == 'electra' else 768
+            similarity_scorer = TapNetSimilarityScorer(
+                sim_func=sim_func, num_anchors=num_anchors, mlp_out_dim=opt.tap_mlp_out_dim,
+                random_init=opt.tap_random_init, random_init_r=opt.tap_random_init_r,
+                mlp=opt.tap_mlp, emb_log=emb_log, tap_proto=opt.tap_proto, tap_proto_r=opt.tap_proto_r,
+                anchor_dim=anchor_dim)
+            emission_scorer = TapNetEmissionScorer(similarity_scorer, ems_scaler)
+        else:
+            raise TypeError('wrong component type')
+        emission_scorer_map[task] = emission_scorer
 
     ''' Build decoder '''
-    if opt.task == 'sl': # for sequence labeling
+    model_map = {}
+    decoder_map = {}
+    transition_scorer = None
+    if 'sl' in opt.task:  # for sequence labeling
         if opt.decoder == 'sms':
-            transition_scorer = None
             decoder = SequenceLabeler()
         elif opt.decoder == 'rule':
-            transition_scorer = None
             decoder = RuleSequenceLabeler(config['id2label'])
         elif opt.decoder == 'crf':
             # logger.info('We only support back-off trans training now!')
@@ -132,7 +138,7 @@ def make_model(opt, config):
             elif opt.transition == 'learn_with_label':
                 label_trans_normalizer = build_scale_controller(name=opt.label_trans_normalizer)
                 label_trans_scaler = build_scale_controller(name=opt.label_trans_scaler, kwargs=make_scaler_args(
-                        opt.label_trans_scaler, label_trans_normalizer, opt.label_trans_scale_r))
+                    opt.label_trans_scaler, label_trans_normalizer, opt.label_trans_scale_r))
                 transition_scorer = FewShotTransitionScorerFromLabel(
                     num_tags=config['num_tags'], normalizer=trans_normalizer, scaler=trans_scaler,
                     r=opt.trans_r, backoff_init=opt.backoff_init, label_scaler=label_trans_scaler)
@@ -149,35 +155,41 @@ def make_model(opt, config):
                 num_tags=transition_scorer.num_tags, constraints=constraints)  # accurate tags
         else:
             raise TypeError('wrong component type')
-    elif opt.task == 'sc':  # for single-label text classification task
+
+        # decoder_map['sl'] = decoder
+        seq_laber = SchemaFewShotSeqLabeler if opt.use_schema else FewShotSeqLabeler
+        model_map['sl'] = seq_laber(opt=opt,
+                                    context_embedder=context_embedder,
+                                    emission_scorer=emission_scorer_map['sl'],
+                                    decoder=decoder,
+                                    transition_scorer=transition_scorer,
+                                    config=config,
+                                    emb_log=emb_log)
+
+    if 'sc' in opt.task:  # for single-label text classification task
         decoder = SingleLabelTextClassifier()
-    else:
-        raise TypeError('wrong task type')
+        # decoder_map['sc'] = decoder
+        text_classifier = SchemaFewShotTextClassifier if opt.use_schema else FewShotTextClassifier
+        model_map['sc'] = text_classifier(opt=opt,
+                                          context_embedder=context_embedder,
+                                          emission_scorer=emission_scorer_map['sc'],
+                                          decoder=decoder,
+                                          config=config,
+                                          emb_log=emb_log)
 
     ''' Build the whole model '''
-    if opt.task == 'sl':
-        seq_labeler = SchemaFewShotSeqLabeler if opt.use_schema else FewShotSeqLabeler
-        model = seq_labeler(
-            opt=opt,
-            context_embedder=context_embedder,
-            emission_scorer=emission_scorer,
-            decoder=decoder,
-            transition_scorer=transition_scorer,
-            config=config,
-            emb_log=emb_log
-        )
-    elif opt.task == 'sc':
-        text_classifier = SchemaFewShotTextClassifier if opt.use_schema else FewShotTextClassifier
-        model = text_classifier(
-            opt=opt,
-            context_embedder=context_embedder,
-            emission_scorer=emission_scorer,
-            decoder=decoder,
-            config=config,
-            emb_log=emb_log
-        )
-    else:
-        raise TypeError('wrong task type')
+    few_shot_learner = SchemaFewShotLearner if opt.use_schema else FewShotLearner
+    model = few_shot_learner(
+        opt=opt,
+        context_embedder=context_embedder,
+        # emission_scorer_map=emission_scorer_map,
+        # decoder_map=decoder_map,
+        # transition_scorer=transition_scorer,
+        model_map=model_map,
+        config=config,
+        emb_log=emb_log
+    )
+
     return model
 
 
