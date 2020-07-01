@@ -229,18 +229,25 @@ def main():
             print('Train: Few_shot_data gathered and start to dump data')
             few_shot_data_statistic(opt, train_meta_data)
 
-            """dev & test"""
-            if opt.use_fix_support:
-                domains = raw_data['support'].keys()
-                dev_meta_data = {}
-                for domain in domains:
-                    dev_meta_data[domain] = [{'support': raw_data['support'][domain], 'query': raw_data['dev'][domain]}]
-            else:
-                dev_meta_data = generator.gen_data(raw_data['dev'])
-
+            """dev"""
+            dev_meta_data = generator.gen_data(raw_data['dev'])
             print('Dev: Few_shot_data gathered and start to dump data')
             few_shot_data_statistic(opt, dev_meta_data)
-            meta_data = {'train': train_meta_data, 'dev': dev_meta_data, 'test': dev_meta_data}
+
+            """test"""
+            if opt.use_fix_support:
+                domains = raw_data['support'].keys()
+                test_meta_data = {}
+                for domain in domains:
+                    test_meta_data[domain] = [{'support': raw_data['support'][domain],
+                                              'query': raw_data['test'][domain]}]
+            else:
+                test_meta_data = generator.gen_data(raw_data['test'])
+            print('Dev: Few_shot_data gathered and start to dump data')
+            few_shot_data_statistic(opt, test_meta_data)
+
+            """meta data"""
+            meta_data = {'train': train_meta_data, 'dev': dev_meta_data, 'test': test_meta_data}
         else:
             meta_data = generator.gen_data(raw_data)
             print('Few_shot_data gathered and start to dump data')
