@@ -2,10 +2,6 @@
 import torch
 from typing import Tuple, Dict, List
 from models.modules.context_embedder_base import ContextEmbedderBase
-from models.modules.emission_scorer_base import EmissionScorerBase
-from models.modules.transition_scorer import TransitionScorerBase
-from models.few_shot_seq_labeler import FewShotSeqLabeler, SchemaFewShotSeqLabeler
-from models.few_shot_text_classifier import FewShotTextClassifier, SchemaFewShotTextClassifier
 
 
 class FewShotLearner(torch.nn.Module):
@@ -20,11 +16,17 @@ class FewShotLearner(torch.nn.Module):
         self.opt = opt
         self.context_embedder = context_embedder
         self.no_embedder_grad = opt.no_embedder_grad
-        self.label_mask = None
         self.config = config
         self.emb_log = emb_log
 
-        self.model_map = model_map
+        self.label_mask = None
+
+        # self.model_map = model_map
+        if 'sl' in model_map:
+            self.seq_labeler_model = model_map['sl']
+
+        if 'sc' in model_map:
+            self.classifier_model = model_map['sc']
 
     def forward(
             self,
@@ -70,18 +72,34 @@ class FewShotLearner(torch.nn.Module):
         if self.training:
             loss = 0.
             for task in self.opt.task:
-                loss += self.model_map[task](reps_map[task]['test'], test_output_mask_map[task],
-                                             reps_map[task]['support'], support_output_mask_map[task],
-                                             test_target_map[task], support_target_map[task], support_num,
-                                             self.training)
+                if self.opt.do_debug:
+                    print('task: {} - test_target: {} - {}'.format(task, test_target_map[task].size(), test_target_map[task]))
+                if task == 'sl':
+                    loss += self.seq_labeler_model(reps_map[task]['test'], test_output_mask_map[task],
+                                                   reps_map[task]['support'], support_output_mask_map[task],
+                                                   test_target_map[task], support_target_map[task], self.label_mask)
+                elif task == 'sc':
+                    loss += self.classifier_model(reps_map[task]['test'], test_output_mask_map[task],
+                                                  reps_map[task]['support'], support_output_mask_map[task],
+                                                  test_target_map[task], support_target_map[task], self.label_mask)
+                else:
+                    raise ValueError
             return loss
         else:
             prediction_map = {}
             for task in self.opt.task:
-                prediction = self.model_map[task](reps_map[task]['test'], test_output_mask_map[task],
-                                                  reps_map[task]['support'], support_output_mask_map[task],
-                                                  test_target_map[task], support_target_map[task], support_num,
-                                                  self.training)
+                if task == 'sl':
+                    prediction = self.seq_labeler_model.decode(reps_map[task]['test'], test_output_mask_map[task],
+                                                               reps_map[task]['support'], support_output_mask_map[task],
+                                                               test_target_map[task], support_target_map[task],
+                                                               self.label_mask)
+                elif task == 'sc':
+                    prediction = self.classifier_model.decode(reps_map[task]['test'], test_output_mask_map[task],
+                                                              reps_map[task]['support'], support_output_mask_map[task],
+                                                              test_target_map[task], support_target_map[task],
+                                                              self.label_mask)
+                else:
+                    raise ValueError
                 prediction_map[task] = prediction
             return prediction_map
 
@@ -125,7 +143,6 @@ class SchemaFewShotLearner(FewShotLearner):
             emb_log: str = None
     ):
         super(SchemaFewShotLearner, self).__init__(opt, context_embedder, model_map, config, emb_log)
-        self.model_map = model_map
 
     def forward(
             self,
@@ -194,18 +211,34 @@ class SchemaFewShotLearner(FewShotLearner):
         if self.training:
             loss = 0.
             for task in self.opt.task:
-                loss += self.model_map[task](reps_map[task]['test'], test_output_mask_map[task],
-                                             reps_map[task]['support'], support_output_mask_map[task],
-                                             test_target_map[task], support_target_map[task],
-                                             support_num, label_reps_map[task], self.training)
+                if task == 'sl':
+                    loss += self.seq_labeler_model(reps_map[task]['test'], test_output_mask_map[task],
+                                                   reps_map[task]['support'], support_output_mask_map[task],
+                                                   test_target_map[task], support_target_map[task],
+                                                   label_reps_map[task], self.label_mask)
+                elif task == 'sc':
+                    loss += self.classifier_model(reps_map[task]['test'], test_output_mask_map[task],
+                                                  reps_map[task]['support'], support_output_mask_map[task],
+                                                  test_target_map[task], support_target_map[task],
+                                                  label_reps_map[task], self.label_mask)
+                else:
+                    raise ValueError
             return loss
         else:
             prediction_map = {}
             for task in self.opt.task:
-                prediction = self.model_map[task](reps_map[task]['test'], test_output_mask_map[task],
-                                                  reps_map[task]['support'], support_output_mask_map[task],
-                                                  test_target_map[task], support_target_map[task],
-                                                  support_num, label_reps_map[task], self.training)
+                if task == 'sl':
+                    prediction = self.seq_labeler_model.decode(reps_map[task]['test'], test_output_mask_map[task],
+                                                               reps_map[task]['support'], support_output_mask_map[task],
+                                                               test_target_map[task], support_target_map[task],
+                                                               label_reps_map[task], self.label_mask)
+                elif task == 'sc':
+                    prediction = self.classifier_model.decode(reps_map[task]['test'], test_output_mask_map[task],
+                                                              reps_map[task]['support'], support_output_mask_map[task],
+                                                              test_target_map[task], support_target_map[task],
+                                                              label_reps_map[task], self.label_mask)
+                else:
+                    raise ValueError
                 prediction_map[task] = prediction
             return prediction_map
 

@@ -131,6 +131,8 @@ def test_args(parser):
     group = parser.add_argument_group('Test')
     group.add_argument("--test_batch_size", default=2, type=int, help="Must same to few-shot batch size now")
     group.add_argument("--test_on_cpu", default=False, action='store_true', help="eval on cpu")
+    group.add_argument("--judge_joint_success", default=False, action='store_true',
+                       help="set the eval method to judge joint score with joint success")
 
     return parser
 

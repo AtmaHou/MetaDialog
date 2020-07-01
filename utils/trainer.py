@@ -78,10 +78,11 @@ class TrainerBase:
         do training and dev model selection
         :param model:
         :param train_features:
+        :param num_train_epochs:
         :param dev_features:
-        :param dev_id2label:
+        :param dev_id2label_map:
         :param test_features:
-        :param test_id2label:
+        :param test_id2label_map:
         :param best_dev_score_now:
         :return:
         """
@@ -248,11 +249,13 @@ class TrainerBase:
 
     def is_bigger(self, first_score: Dict[str, float], second_score: Dict[str, float],
                   task_weight: Dict[str, float] = None)->bool:
-        task_lst = first_score.keys()
+        task_lst = [task_name for task_name in first_score.keys() if task_name != 'success']
         if isinstance(second_score, dict):
-            assert task_lst == second_score.keys(), "the two scores should have same keys"
+            assert first_score.keys() == second_score.keys(), "the two scores should have same keys"
         elif isinstance(second_score, int) or isinstance(second_score, float):
             second_score = {task: second_score for task in task_lst}
+            if 'success' in first_score:
+                second_score['success'] = 0
         else:
             raise TypeError('the second_score should be int or a dict to assign every task a int or float value')
 
@@ -261,10 +264,17 @@ class TrainerBase:
         else:
             task_weight = {task: 1.0 / len(task_lst) for task in task_lst}
 
-        first_avg_score = [score * task_weight[task] for task, score in first_score.items()]
-        second_avg_score = [score * task_weight[task] for task, score in second_score.items()]
+        print('task_weight: {}'.format(task_weight))
 
-        return first_avg_score > second_avg_score
+        first_avg_score = sum([score * task_weight[task] for task, score in first_score.items() if task in task_lst])
+        second_avg_score = sum([score * task_weight[task] for task, score in second_score.items() if task in task_lst])
+
+        if self.opt.judge_joint_success and len(task_lst) > 1:
+            bigger = first_score['success'] > second_score['success']
+        else:
+            bigger = first_avg_score > second_avg_score
+
+        return bigger
 
     def model_selection(self, model, best_score, dev_features, dev_id2label_map, test_features=None, test_id2label_map=None):
         """ do model selection during training"""
@@ -272,7 +282,7 @@ class TrainerBase:
         # do dev eval at every dev_interval point and every end of epoch
         dev_model = self.tester.clone_model(model, dev_id2label_map)  # copy reusable params, for a different domain
         if self.opt.mask_transition and 'sl' in self.opt.task:
-            dev_model.model_map['sl'].label_mask = self.opt.dev_label_mask.to(self.device)
+            dev_model.label_mask = self.opt.dev_label_mask.to(self.device)
 
         dev_score_map = self.tester.do_test(dev_model, dev_features, dev_id2label_map, log_mark='dev_pred')
         logger.info("  dev score(F1) = {}".format(dev_score_map))
@@ -292,7 +302,7 @@ class TrainerBase:
                 # copy reusable params for different domain
                 test_model = self.tester.clone_model(model, test_id2label_map)
                 if self.opt.mask_transition and 'sl' in self.opt.task:
-                    test_model.model_map['sl'].label_mask = self.opt.test_label_mask.to(self.device)
+                    test_model.label_mask = self.opt.test_label_mask.to(self.device)
 
                 test_score_map = self.tester.do_test(test_model, test_features, test_id2label_map, log_mark='test_pred')
                 logger.info("  test score(F1) = {}".format(test_score_map))
@@ -412,13 +422,13 @@ class FewShotTrainer(TrainerBase):
             feature.test_input.segment_ids,
             feature.test_input.nwp_index,
             feature.test_input.input_mask,
-            feature.test_input.output_mask,
+            feature.test_input.output_mask_map,
             # support
             feature.support_input.token_ids,
             feature.support_input.segment_ids,
             feature.support_input.nwp_index,
             feature.support_input.input_mask,
-            feature.support_input.output_mask,
+            feature.support_input.output_mask_map,
             # target
             feature.test_target_map,
             feature.support_target_map,

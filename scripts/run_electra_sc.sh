@@ -26,9 +26,8 @@ label_num_schema=
 dataset_lst=($2 $3)
 support_shots_lst=(3)
 
-query_shot=8
-
-episode=100
+query_shot=4
+episode=50
 
 cross_data_id=0  # for smp
 
@@ -131,11 +130,6 @@ emb_log=
 #decoder_lst=(sms)
 #decoder_lst=(crf)
 #decoder_lst=(crf sms)
-#decoder_lst=(mlc)
-#decoder_lst=(eamlc)
-#decoder_lst=(msmlc)
-#decoder_lst=(krnmsmlc)
-
 
 # -------- SC decoder setting --------
 
@@ -151,7 +145,7 @@ pretrained_vocab_path=/users4/yklai/corpus/electra/chinese_electra_small_discrim
 #pretrained_model_path=/Users/lyk/Code/model/chinese_electra_small_discriminator_pytorch
 #pretrained_vocab_path=/Users/lyk/Code/model/chinese_electra_small_discriminator_pytorch
 
-base_data_dir=/users4/yklai/code/Dialogue/FewShot/MetaDial/data/SmpMetaData/
+base_data_dir=/users4/yklai/code/Dialogue/FewShot/MetaDial/data/smp_true/
 #base_data_dir=/Users/lyk/Work/Dialogue/FewShot/SMP/smp2/
 
 echo [START] set jobs on dataset [ ${dataset_lst[@]} ] on gpu [ ${gpu_list} ]

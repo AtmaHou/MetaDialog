@@ -8,8 +8,8 @@ echo log file path ../sllog/
 gpu_list=$1
 
 # Comment one of follow 2 to switch debugging status
-do_debug=--do_debug
-#do_debug=
+#do_debug=--do_debug
+do_debug=
 
 task=sl
 
@@ -41,14 +41,15 @@ upper_lr_lst=(0.001)
 
 fix_embd_epoch_lst=(-1)
 
-warmup_epoch=1
+#warmup_epoch=1
+warmup_epoch=-1
 
 
 train_batch_size_lst=(4)
 test_batch_size=4
 grad_acc=2
 #grad_acc=4  # if the GPU-memory is not enough, use bigger gradient accumulate
-epoch=3
+epoch=1
 
 # ==== model setting =========
 # ---- encoder setting -----
@@ -139,7 +140,8 @@ transition=learn
 pretrained_model_path=/users4/yklai/corpus/electra/chinese_electra_small_discriminator
 pretrained_vocab_path=/users4/yklai/corpus/electra/chinese_electra_small_discriminator
 
-base_data_dir=/users4/yklai/code/Dialogue/FewShot/MetaDial/data/smp/
+#base_data_dir=/users4/yklai/code/Dialogue/FewShot/MetaDial/data/smp_true/
+base_data_dir=/users4/yklai/code/Dialogue/FewShot/MetaDial/data/smp_sl/
 
 
 echo [START] set jobs on dataset [ ${dataset_lst[@]} ] on gpu [ ${gpu_list} ]
@@ -173,7 +175,7 @@ do
                                                     for cross_data_id in ${cross_data_id_lst[@]}
                                                     do
                                                         # model names
-                                                        model_name=sl.electra.dec_${decoder}.enc_${embedder}.ems_${emission}${do_div_emission}.mlp_${tap_mlp}_random_${tap_random_init_r}.e_scl_${emission_scaler}${ems_scale_r}_${emission_normalizer}.lb_${label_reps}_scl_${ple_scaler}${ple_scale_r}.t_scl_${trans_scaler}${trans_scale_r}_${trans_normalizer}.t_i_${trans_init}.${mask_trans}_.sim_${similarity}.lr_${lr}.up_lr_${upper_lr}.bs_${train_batch_size}_${test_batch_size}.sp_b_${grad_acc}.w_ep_${warmup_epoch}.ep_${epoch}--fix_dev_spt${do_debug}
+                                                        model_name=2r_sl.electra.dec_${decoder}.enc_${embedder}.ems_${emission}${do_div_emission}.e_scl_${emission_scaler}${ems_scale_r}_${emission_normalizer}.lb_${label_reps}_scl_${ple_scaler}${ple_scale_r}.t_scl_${trans_scaler}${trans_scale_r}_${trans_normalizer}.t_i_${trans_init}.${mask_trans}_.sim_${similarity}.lr_${lr}.up_lr_${upper_lr}.bs_${train_batch_size}_${test_batch_size}.sp_b_${grad_acc}.w_ep_${warmup_epoch}.ep_${epoch}--fix_dev_spt${do_debug}
 
                                                         data_dir=${base_data_dir}${dataset}.${cross_data_id}.spt_s_${support_shots}.q_s_${query_shot}.ep_${episode}${use_schema}--fix_dev_spt/
                                                         file_mark=${dataset}.shots_${support_shots}.cross_id_${cross_data_id}.m_seed_${seed}
@@ -236,8 +238,8 @@ do
                                                             -t_nm ${trans_normalizer} \
                                                             -t_scl ${trans_scaler} \
                                                             --trans_scale_r ${trans_scale_r} \
-                                                            ${mask_trans} \
-                                                            --load_feature > ./sllog/${model_name}.DATA.${file_mark}.log
+                                                            ${mask_trans} > ./sllog/${model_name}.DATA.${file_mark}.log
+                                                            # --load_feature > ./sllog/${model_name}.DATA.${file_mark}.log
                                                         echo [CLI]
                                                         echo Model: ${model_name}
                                                         echo Task:  ${file_mark}

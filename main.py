@@ -48,7 +48,6 @@ def get_training_data_and_feature(opt, data_loader, preprocessor):
         dev_features = preprocessor.construct_feature(dev_examples, dev_max_support_size,
                                                       dev_label2id_map, dev_id2label_map)
         logger.info(' Finish prepare train dev features ')
-
         if opt.save_feature:
             save_feature(opt.train_path.replace('.json', '.saved.pk'),
                          train_features, train_label2id_map, train_id2label_map)

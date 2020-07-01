@@ -8,6 +8,7 @@ import copy
 import json
 import collections
 import subprocess
+import numpy as np
 from tqdm import tqdm, trange
 from torch.utils.data import TensorDataset, DataLoader, RandomSampler, SequentialSampler
 from torch.utils.data.distributed import DistributedSampler
@@ -136,7 +137,48 @@ class FewShotTester(TesterBase):
         for b_id, fs_batch in all_batches:
             f1_map = self.eval_one_few_shot_batch(b_id, fs_batch, id2label_map, log_mark)
             all_scores.append(f1_map)
-        return {task: sum([item[task] for item in all_scores]) * 1.0 / len(all_scores) for task in id2label_map.keys()}
+
+        res = {task: sum([item[task] for item in all_scores]) * 1.0 / len(all_scores) for task in id2label_map.keys()}
+
+        # TODO: change to more general
+        if 'sc' in self.opt.task and 'sl' in self.opt.task:
+            all_intents = [[item['sc'] for item in fs_batch] for b_id, fs_batch in all_batches]
+            all_slots = [[item['sl'] for item in fs_batch] for b_id, fs_batch in all_batches]
+
+            # prediction is directly the predict ids [pad is removed in decoder]
+            all_intent_pred_ids = [[result.prediction for result in batch_intents] for batch_intents in all_intents]
+            all_intent_features = [[result.feature for result in batch_intents] for batch_intents in all_intents]
+            all_intent_pred_labels = [[id2label_map['sc'][pred_ids[0]] for pred_ids in batch_pred_ids]
+                                      for batch_pred_ids in all_intent_pred_ids]
+            all_intent_target_labels = [[feature.test_feature_item.data_item.label[0] for feature in batch_features]
+                                        for batch_features in all_intent_features]
+            all_intent_pred_labels = np.array(all_intent_pred_labels)
+            all_intent_target_labels = np.array(all_intent_target_labels)
+            success = (all_intent_pred_labels == all_intent_target_labels)
+            # print('success: {} - {}'.format(np.mean(success), success))
+
+            all_slot_pred_ids = [[result.prediction for result in batch_slots] for batch_slots in all_slots]
+            all_slot_features = [[result.feature for result in batch_slots] for batch_slots in all_slots]
+            all_slot_pred_labels = [[[id2label_map['sl'][pred_id] for pred_id in pred_ids]
+                                     for pred_ids in batch_pred_ids] for batch_pred_ids in all_slot_pred_ids]
+            all_slot_target_labels = [[feature.test_feature_item.data_item.seq_out for feature in batch_features]
+                                      for batch_features in all_slot_features]
+
+            for b_idx, (b_pred_labels, b_target_labels) in enumerate(zip(all_slot_pred_labels, all_slot_target_labels)):
+                for i_idx, (pred_labels, target_labels) in enumerate(zip(b_pred_labels, b_target_labels)):
+                    for p_label, t_label in zip(pred_labels, target_labels):
+                        if p_label != t_label:
+                            success[b_idx][i_idx] = False
+                            break
+
+            success = success.astype(float)
+            success = np.mean(success)
+
+            res['success'] = success
+
+            # print('res: {}'.format(res))
+
+        return res
 
     def eval_one_few_shot_batch(self, b_id, fs_batch: List[Dict[str, RawResult]], id2label_map: Dict[str, Dict[int, str]],
                                 log_mark: str) -> Dict[str, float]:
@@ -225,6 +267,7 @@ class FewShotTester(TesterBase):
         precision = float(std_results[3].replace('%;', ''))
         recall = float(std_results[5].replace('%;', ''))
         f1 = float(std_results[7].replace('%;', '').replace("\\n'", ''))
+        f1 = f1 / 100  # normalize to [0, 1]
         return precision, recall, f1
 
     def reform_few_shot_batch(self, all_results: List[Dict[str, RawResult]]
@@ -252,13 +295,13 @@ class FewShotTester(TesterBase):
             feature.test_input.segment_ids,
             feature.test_input.nwp_index,
             feature.test_input.input_mask,
-            feature.test_input.output_mask,
+            feature.test_input.output_mask_map,
             # support
             feature.support_input.token_ids,
             feature.support_input.segment_ids,
             feature.support_input.nwp_index,
             feature.support_input.input_mask,
-            feature.support_input.output_mask,
+            feature.support_input.output_mask_map,
             # target
             feature.test_target_map,
             feature.support_target_map,
@@ -332,14 +375,14 @@ class FewShotTester(TesterBase):
         else:
             sub_new_model = new_model
         ''' copy weights and stuff '''
-        if 'sl' in old_model.opt.task and old_model.model_map['sl'].transition_scorer:
+        if 'sl' in old_model.opt.task and old_model.seq_labeler_model.transition_scorer:
             # copy one-by-one because target transition and decoder will be left un-assigned
             sub_new_model.context_embedder.load_state_dict(old_model.context_embedder.state_dict())
-            sub_new_model.model_map['sl'].emission_scorer.load_state_dict(
-                old_model.model_map['sl'].emission_scorer.state_dict())
+            sub_new_model.seq_labeler_model.emission_scorer.load_state_dict(
+                old_model.seq_labeler_model.emission_scorer.state_dict())
             for param_name in ['backoff_trans_mat', 'backoff_start_trans_mat', 'backoff_end_trans_mat']:
-                sub_new_model.model_map['sl'].transition_scorer.state_dict()[param_name].copy_(
-                    old_model.model_map['sl'].transition_scorer.state_dict()[param_name].data)
+                sub_new_model.seq_labeler_model.transition_scorer.state_dict()[param_name].copy_(
+                    old_model.seq_labeler_model.transition_scorer.state_dict()[param_name].data)
         else:
             sub_new_model.load_state_dict(old_model.state_dict())
 
