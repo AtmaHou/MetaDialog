@@ -45,7 +45,7 @@ bert_base_uncased=/your_dir/uncased_L-12_H-768_A-12/
 bert_base_uncased_vocab=/your_dir/uncased_L-12_H-768_A-12/vocab.txt
 ```
 
-### Step2: Prepare data
+#### Step2: Prepare data
 - Download the few-shot sequence-labeling data at [my homepage](https://atmahou.github.io/) or click here: [download](https://atmahou.github.io/attachments/ACL2020data.zip)
 
 - Set test, train, dev data file path in `./scripts/run_1_shot_slot_tagging.sh` to your setting.
@@ -55,7 +55,7 @@ bert_base_uncased_vocab=/your_dir/uncased_L-12_H-768_A-12/vocab.txt
 base_data_dir=/your_dir/ACL2020data/
 ```
 
-### Step3: Train and test the main model
+#### Step3: Train and test the main model
 - Build a folder to collect running log
 ```bash
 mkdir result
