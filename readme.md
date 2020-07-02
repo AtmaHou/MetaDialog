@@ -1,8 +1,24 @@
 # Meta Dialog Platform (MDP)
 
-Meta Dialog Platform, is a tool for Few-Shot Learning. The platform now can be used for `classification` and `sequence labeling`.
+Meta Dialog Platform: a toolkit platform for **NLP Few-Shot Learning** tasks of:
+- Text Classification
+- Sequence Labeling
 
-As [Electra](https://openreview.net/forum?id=r1xMH1BtvB) proposed, we can use `Electra small model` to speed up our exploitation because it's so small. And if you want to get the chinese version, you can go [Chinese-Electra](https://github.com/ymcui/Chinese-ELECTRA).
+It also provides the baselines for [Track-1 of SMP2020: Few-shot dialog language understanding](https://smp2020.aconf.cn/smp.html#3).
+
+### Features
+State-of-the-art solutions for Few-shot NLP:
+-  Support Few-shot Learning for sequence-labeling task with state-of-the-art methods: CDT [(Hou et al., 2020)](https://arxiv.org/abs/2006.05702).
+-  Support to use semantic within label name or label description. 
+-  Support various deep pre-trained embedding compatible with [huggingface/transformers](https://github.com/huggingface/transformers), such as **[BERT](https://arxiv.org/abs/1810.04805)** and **[Electra](https://openreview.net/forum?id=r1xMH1BtvB)**.
+-  Support pair-wise embedding mechanism ([Hou et al., 2020](https://arxiv.org/abs/2006.05702), [Gao et al., 2019](https://www.aclweb.org/anthology/D19-1649)).
+
+
+Easy-to-start & flexible framework:
+-  Provide tools for easy training & testing.
+-  Support various few-shot models with unified and extendable interfaces, such as ProtoNet and TapNet.
+-  Support easy-to-switch similarity-metrics and logits-scaling methods.
+-  Provide tools of generating episode-style data for meta-learning.
 
 
 ## Get Started
@@ -15,46 +31,90 @@ transformers>=2.9.0
 numpy>=1.17.0
 tqdm>=4.31.1
 allennlp>=0.8.4
+pytorch-nlp
 ```
 
-### Prepare pre-trained embedding:
+### Example for Sequence Labeling
+Here, we take the few-shot slot tagging and NER task from [(Hou et al., 2020)](https://arxiv.org/abs/2006.05702) as quick start examples.
 
-#### BERT
-
-Down the pytorch bert model, or convert tensorflow param yourself as follow:
-
+#### Step1: Prepare pre-trained embedding
+- Download the pytorch bert model, or convert tensorflow param by yourself with [scripts](https://github.com/huggingface/transformers/blob/master/src/transformers/convert_bert_original_tf_checkpoint_to_pytorch.py).
+- Set BERT path in the `./scripts/run_1_shot_slot_tagging.sh` to your setting:
 ```bash
-export BERT_BASE_DIR=/users4/ythou/Projects/Resources/bert-base-uncased/uncased_L-12_H-768_A-12/
-
-pytorch_pretrained_bert convert_tf_checkpoint_to_pytorch
-  $BERT_BASE_DIR/bert_model.ckpt
-  $BERT_BASE_DIR/bert_config.json
-  $BERT_BASE_DIR/pytorch_model.bin
+bert_base_uncased=/your_dir/uncased_L-12_H-768_A-12/
+bert_base_uncased_vocab=/your_dir/uncased_L-12_H-768_A-12/vocab.txt
 ```
 
-Set BERT path in the `scripts/*.sh` whose variable name is `pretrained_model_path` 
+### Step2: Prepare data
+- Download the few-shot sequence-labeling data at [my homepage](https://atmahou.github.io/) or click here: [download](https://atmahou.github.io/attachments/ACL2020data.zip)
 
-### Prepare data
-
-Original data is available by contacting me, or you can generate it:
-Set test, train, dev data file path in ./scripts/
-
-#### Few-shot Data Generation
-
-We provide a generation tool for converting normal data into few-shot/meta-episode style.
-
-The generation tool is in the `scripts/other_tool` folder named `meta_dataset_generator`.
-And we provide a bash script named `gen_meta_data.sh` which is used to control to run the generation tool.
-
-Run command line:
+- Set test, train, dev data file path in `./scripts/run_1_shot_slot_tagging.sh` to your setting.
+  
+> For simplicity, your only need to set the root path for data as follow:
 ```bash
-cd scripts
-source ./gen_meta_data.sh
+base_data_dir=/your_dir/ACL2020data/
 ```
 
-##### gen_meta_data.sh
+### Step3: Train and test the main model
+- Build a folder to collect running log
+```bash
+mkdir result
+```
 
-There are some params for you to control the generation process:
+- Execute cross-evaluation script with two params: -[gpu id] -[dataset name]
+
+##### Example for 1-shot slot tagging:
+```bash
+source ./scripts/run_1_shot_slot_tagging.sh 0 snips
+```  
+
+##### Example for 1-shot NER:
+```bash
+source ./scripts/run_1_shot_slot_tagging.sh 0 ner
+```
+
+> To run 5-shots experiments, use `./scripts/run_5_shot_slot_tagging.sh`
+
+### Other detailed functions and options:
+You can experiment freely by passing parameters to `main.py` to choose different model architectures, hyperparameters, etc.
+
+To view detailed options and corresponding descriptions, run commandline: 
+```bash
+python main.py --h
+```
+
+We provide scripts for general few-shot classification and sequence labeling task respectively:
+
+- classification
+    - `run_electra_sc.sh`
+    - `run_bert_sc.sh`
+- sequence labeling
+    - `run_electra_sl.sh`
+    - `run_bert_sl.sh`
+
+The usage of these scripts are similar to process in Get Started.
+
+
+## run with SMP data
+- Get constructed SMP data by contact me or sign up for the [Track-1 of SMP2020](https://smp2020.aconf.cn/smp.html#3) and construct few-shot data by yourself.
+- Use script `./scripts/run_smp_bert_sc.sh` and `./scripts/run_smp_bert_sl.sh` to perform few-shot intent detection or few-shot slot filling respectively.
+- Notice that: 
+    1. For data confidentiality, the testset labels are not given, so the testing scores in output are meaningless. 
+    2. Find predicted results at `trained_model_path` within running scripts.
+
+
+## Few-shot Data Construction Tool
+We also provide a generation tool for converting normal data into few-shot/meta-episode style. 
+The tool is included at path: `scripts/other_tool/meta_dataset_generator.py`. 
+
+Run following commandline to view detailed interface:
+```bash
+python generate_meta_dataset.py --h
+```
+
+For simplicity, we provide an example script to help generate few-shot data: `./scripts/gen_meta_data.sh`.
+
+The following are some key params for you to control the generation process:
 - `input_dir`: raw data path
 - `output_dir`: output data path
 - `episode_num`: the number of episode which you want to generate
@@ -65,10 +125,10 @@ There are some params for you to control the generation process:
 - `dataset_lst`: specified the dataset type which our tool can handle, there are some choices: `stanford` & `SLU` & `TourSG` & `SMP`. 
 
 > If you want to handle other type of dataset, 
-> you can add your code for processing dataset in `meta_dataset_generator/raw_data_loader.py`, 
-> and add the dataset type to parameter controller in `meta_dataset_generator/generate_meta_dataset.py`.
+> you can add your code for load raw dataset in `meta_dataset_generator/raw_data_loader.py`.
 
-##### few-shot/meta-episode style
+
+##### few-shot/meta-episode style data example
 
 ```json
 {
@@ -93,41 +153,7 @@ There are some params for you to control the generation process:
 ```
 
 
-### Train and test the main model
 
-Run command line:
-```bash
-source ./scripts/run_main.sh [gpu id split with ','] [data set name]
-```
-
-Example:
-```bash
-source ./scripts/run_main.sh 1,2 snips
-```
-
-#### bash scripts
-
-We provide some bash scripts for convenience. As mentioned, we provide two scripts for each task respectively, each task has the `Electra` version and `BERT` version.
-
-- classification
-    - `run_electra_sc.sh`
-    - `run_bert_sc.sh`
-- sequence labeling
-    - `run_electra_sl.sh`
-    - `run_bert_sl.sh`
-
-#### parameters
-
-There are many parameters to control the train & test process, but there are some main parameters you should change and know.
-- `do_debug`: set for debug model
-- `task`: specify the target task
-- dataset name: `support_shots_lst` & `query_shot` & `episode` & `cross_id` are used for specify the dataset path
-- `embedder`: specify the embedder type, the choices are `bert` & `electra` & `sep_bert` & `glove`, in which `sep_bert` are not pair-wise embedding while others do.
-- `pretrained_model_path`: the pre-trained model path
-- `pretrained_vocab_path`: the vocabulary of pre-trained model, you can specify the file or its parent folder (default find the `vocab.txt` in it)
-- `base_data_dir`: the path of your dataset, the `base` mean that in which there are sub-folders (the sub-folders is named with `dataset name` mentioned at second item). If not, you can adjust the script.
- 
-
-## Information
+## Acknowledgment
 
 The platform is developed by [HIT-SCIR](http://ir.hit.edu.cn/). If you have any question and advice for it, please contact us(Yutai Hou - [ythou@ir.hit.edu.cn]() or Yongkui Lai - [yklai@ir.hit.edu.cn]()).

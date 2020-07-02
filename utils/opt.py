@@ -79,7 +79,7 @@ def train_args(parser):
     group.add_argument("--num_train_epochs", default=20, type=float,
                        help="Number of training epochs to perform.")
     group.add_argument("--warmup_proportion", default=0.1, type=float,
-                       help="Proportion of training to perform linear learning rate warmup for. E.g.10% of training.")
+                       help="Proportion of training to perform linear learning rate warmup for. E.g.10%% of training.")
     group.add_argument("--eval_when_train", default=False, action='store_true',
                        help="Test model found new best model")
 
