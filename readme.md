@@ -46,7 +46,7 @@ bert_base_uncased_vocab=/your_dir/uncased_L-12_H-768_A-12/vocab.txt
 ```
 
 #### Step2: Prepare data
-- Download the few-shot sequence-labeling data at [my homepage](https://atmahou.github.io/) or click here: [download](https://atmahou.github.io/attachments/ACL2020data.zip)
+- Download the **compatible** few-shot data at here: [download](https://atmahou.github.io/attachments/new_FewShotNLU_data(ACL20).zip)
 
 - Set test, train, dev data file path in `./scripts/run_1_shot_slot_tagging.sh` to your setting.
   
