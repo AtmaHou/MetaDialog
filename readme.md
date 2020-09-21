@@ -4,7 +4,13 @@ Meta Dialog Platform: a toolkit platform for **NLP Few-Shot Learning** tasks of:
 - Text Classification
 - Sequence Labeling
 
-It also provides the baselines for [Track-1 of SMP2020: Few-shot dialog language understanding](https://smp2020.aconf.cn/smp.html#3).
+It also provides the baselines for:
+- [Track-1 of SMP2020: Few-shot dialog language understanding](https://smp2020.aconf.cn/smp.html#3).
+- [Benchmark Paper: "FewJoint: A Few-shot Learning Benchmark for Joint Language Understanding"]("https://arxiv.org/abs/2009.08138")
+
+### Updates
+
+- Updates 2020.9.17: FewJoint benchmark (Dataset for SMP) is available: [paper](https://arxiv.org/abs/2009.08138), [data](https://atmahou.github.io/attachments/FewJoint.zip)
 
 ### Features
 State-of-the-art solutions for Few-shot NLP:
@@ -19,6 +25,17 @@ Easy-to-start & flexible framework:
 -  Support various few-shot models with unified and extendable interfaces, such as ProtoNet and TapNet.
 -  Support easy-to-switch similarity-metrics and logits-scaling methods.
 -  Provide tools of generating episode-style data for meta-learning.
+
+## Citation
+Please cite code and data:
+```
+@article{hou2020fewjoint,
+	title={FewJoint: A Few-shot Learning Benchmark for Joint Language Understanding},
+	author={Yutai Hou, Jiafeng Mao, Yongkui Lai, Cheng Chen, Wanxiang Che, Zhigang Chen, Ting Liu},
+	journal={arXiv preprint},
+	year={2020}
+}
+```
 
 
 ## Get Started
@@ -95,11 +112,11 @@ We provide scripts for general few-shot classification and sequence labeling tas
 The usage of these scripts are similar to process in Get Started.
 
 
-## run with SMP data
-- Get constructed SMP data by contact me or sign up for the [Track-1 of SMP2020](https://smp2020.aconf.cn/smp.html#3) and construct few-shot data by yourself.
+## run with FewJoint/SMP data
+- Get reformatted FewJoint/SMP data by contact me or construct episode-style data by yourself with [our tool](https://github.com/AtmaHou/MetaDialog#few-shot-data-construction-tool).
 - Use script `./scripts/run_smp_bert_sc.sh` and `./scripts/run_smp_bert_sl.sh` to perform few-shot intent detection or few-shot slot filling respectively.
 - Notice that: 
-    1. For data confidentiality, the testset labels are not given, so the testing scores in output are meaningless. 
+    1. Change train/dev/test path in the scripts before running. 
     2. Find predicted results at `trained_model_path` within running scripts.
 
 
