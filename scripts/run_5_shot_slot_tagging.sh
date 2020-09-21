@@ -11,6 +11,8 @@ gpu_list=$1
 #do_debug=--do_debug
 do_debug=
 
+task=sl
+
 # ======= dataset setting ======
 dataset_lst=($2)
 #dataset_lst=(sf)
@@ -194,6 +196,7 @@ do
                                                         echo [CLI]
                                                         export OMP_NUM_THREADS=2  # threads num for each task
                                                         CUDA_VISIBLE_DEVICES=${gpu_list} python main.py ${do_debug} \
+                                                            --task ${task} \
                                                             --seed ${seed} \
                                                             --do_train \
                                                             --do_predict \
