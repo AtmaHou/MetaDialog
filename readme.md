@@ -112,7 +112,7 @@ We provide scripts for general few-shot classification and sequence labeling tas
 The usage of these scripts are similar to process in Get Started.
 
 
-## run with FewJoint/SMP data
+## Run with FewJoint/SMP data
 - Get reformatted FewJoint data at [here](https://atmahou.github.io/attachments/FewJoint_for_MetaDialog.zip) or construct episode-style data by yourself with [our tool](https://github.com/AtmaHou/MetaDialog#few-shot-data-construction-tool).
 - Use script `./scripts/run_smp_bert_sc.sh` and `./scripts/run_smp_bert_sl.sh` to perform few-shot intent detection or few-shot slot filling respectively.
 - Notice that: 
