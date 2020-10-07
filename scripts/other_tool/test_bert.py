@@ -16,8 +16,10 @@ print('== tokenizing ===')
 tokenizer = BertTokenizer.from_pretrained(BERT_BASE_UNCASED_VOCAB)
 
 # Tokenized input
-text = "Who was Jim Henson ? Jim Henson was a puppeteer"
+text = "organization_founder[B] is persuading  employer[A]"
+# text = "Who was Jim Henson ? Jim Henson was a puppeteer"
 tokenized_text = tokenizer.tokenize(text)
+print(233333333333333, tokenized_text)
 
 # Mask a token that we will try to predict back with `BertForMaskedLM`
 masked_index = 6

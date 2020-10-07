@@ -10,7 +10,7 @@ It also provides the baselines for:
 
 ### Updates
 
-- Updates 2020.9.17: FewJoint benchmark (Dataset for SMP) is available: [paper](https://arxiv.org/abs/2009.08138), [data](https://atmahou.github.io/attachments/FewJoint.zip)
+- Updates 2020.9.17: FewJoint benchmark (Dataset for SMP) is available: [paper](https://arxiv.org/abs/2009.08138), [data](https://atmahou.github.io/attachments/FewJoint.zip), [reformatted data (for MetaDialog)](https://atmahou.github.io/attachments/FewJoint_for_MetaDialog.zip)
 
 ### Features
 State-of-the-art solutions for Few-shot NLP:
@@ -113,7 +113,7 @@ The usage of these scripts are similar to process in Get Started.
 
 
 ## run with FewJoint/SMP data
-- Get reformatted FewJoint/SMP data by contact me or construct episode-style data by yourself with [our tool](https://github.com/AtmaHou/MetaDialog#few-shot-data-construction-tool).
+- Get reformatted FewJoint data at [here](https://atmahou.github.io/attachments/FewJoint_for_MetaDialog.zip) or construct episode-style data by yourself with [our tool](https://github.com/AtmaHou/MetaDialog#few-shot-data-construction-tool).
 - Use script `./scripts/run_smp_bert_sc.sh` and `./scripts/run_smp_bert_sl.sh` to perform few-shot intent detection or few-shot slot filling respectively.
 - Notice that: 
     1. Change train/dev/test path in the scripts before running. 
