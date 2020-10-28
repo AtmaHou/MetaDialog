@@ -326,7 +326,7 @@ class SchemaInputBuilder(BertInputBuilder):
 
 
 class NormalInputBuilder(InputBuilderBase):
-    def __init__(self, tokenizer):d
+    def __init__(self, tokenizer):
         super(NormalInputBuilder, self).__init__(tokenizer)
 
     def __call__(self, example, max_support_size, label2id) -> (FeatureItem, ModelInput, List[FeatureItem], ModelInput):
