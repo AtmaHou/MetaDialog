@@ -48,6 +48,9 @@ def get_training_data_and_feature(opt, data_loader, preprocessor):
         dev_features = preprocessor.construct_feature(dev_examples, dev_max_support_size,
                                                       dev_label2id_map, dev_id2label_map)
         logger.info(' Finish prepare train dev features ')
+        if opt.do_debug:
+            print('train_label2id_map: {}'.format(train_label2id_map))
+            print('dev_label2id_map: {}'.format(dev_label2id_map))
         if opt.save_feature:
             save_feature(opt.train_path.replace('.json', '.saved.pk'),
                          train_features, train_label2id_map, train_id2label_map)
@@ -72,6 +75,8 @@ def get_testing_data_feature(opt, data_loader, preprocessor):
         test_features = preprocessor.construct_feature(
             test_examples, test_max_support_size, test_label2id_map, test_id2label_map)
         logger.info(' Finish prepare test feature')
+        if opt.do_debug:
+            print('test_label2id_map: {}'.format(test_label2id_map))
         if opt.save_feature:
             save_feature(opt.test_path.replace('.json', '.saved.pk'),
                          test_features, test_label2id_map, test_id2label_map)

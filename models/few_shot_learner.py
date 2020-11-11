@@ -72,8 +72,6 @@ class FewShotLearner(torch.nn.Module):
         if self.training:
             loss = 0.
             for task in self.opt.task:
-                if self.opt.do_debug:
-                    print('task: {} - test_target: {} - {}'.format(task, test_target_map[task].size(), test_target_map[task]))
                 if task == 'sl':
                     loss += self.seq_labeler_model(reps_map[task]['test'], test_output_mask_map[task],
                                                    reps_map[task]['support'], support_output_mask_map[task],

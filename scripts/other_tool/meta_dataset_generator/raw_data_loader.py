@@ -400,7 +400,7 @@ class SMPDataLoader(RawDataLoaderBase):
                 all_data[domain]['labels'].extend(part_data[domain]['labels'])
         return all_data
 
-    def load_support_test_data(self, path, support_folder_name='support', test_folder_name='test'):
+    def load_support_test_data(self, path, support_folder_name='support', test_folder_name='correct'):
         support_files = [os.path.join(path, support_folder_name, filename)
                          for filename in os.listdir(os.path.join(path, support_folder_name))
                          if filename.endswith('.json')]
