@@ -403,9 +403,9 @@ class TapNetSimilarityScorer(SimilarityScorerBase):
                 s.append(s_)
                 vh.append(vh_)
             s, vh = torch.stack(s, dim=0), torch.stack(vh, dim=0)
-        s_sum = (s >= 1e-13).sum(dim=1)
+        s_sum = max((s >= 1e-13).sum(dim=1))
         # shape (batch_size, emb_dim, D)
-        M = torch.stack([torch.transpose(vh[i][s_sum[i]:].clone(), 0, 1) for i in range(batch_size)], dim=0)
+        M = torch.stack([vh[i][:, s_sum:].clone() for i in range(batch_size)], dim=0)
 
         '''get final test data reps'''
         # project query data embedding with a MLP
