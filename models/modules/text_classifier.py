@@ -21,7 +21,7 @@ class SingleLabelTextClassifier(torch.nn.Module):
         :return:
         """
         logits = logits.squeeze(-2)
-        tags = tags.squeeze(-2)
+        tags = tags.squeeze(-1)
         loss = self.criterion(logits, tags)
         return loss
 

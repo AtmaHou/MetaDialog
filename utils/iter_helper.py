@@ -80,16 +80,25 @@ class PadCollate:
         ret = []
         for item_idx in range(len(batch[0])):  # pad each data item
             # find longest sequence
-            max_len = max(map(lambda x: x[item_idx].shape[self.get_dim(item_idx)], batch))
-            # if item_idx in self.sp_item_idx:
-            #     print('debug padding:', "item_idx", item_idx, "max_len",
-            #           max_len,'batch items', [x[item_idx].shape for x in batch])
-            # pad according to max_len
-            padded_item_lst = list(map(
-                lambda x: pad_tensor(x[item_idx], pad=max_len, dim=self.get_dim(item_idx)), batch))
-            # stack all
-            padded_item_lst = torch.stack(padded_item_lst, dim=0)
-            ret.append(padded_item_lst)
+            if isinstance(batch[0][item_idx], dict):
+                padded_item_lst_map = {}
+                for key in batch[0][item_idx].keys():
+                    max_len = max(map(lambda x: x[item_idx][key].shape[self.get_dim(item_idx)], batch))
+                    # pad according to max_len
+                    padded_item_lst = list(map(
+                        lambda x: pad_tensor(x[item_idx][key], pad=max_len, dim=self.get_dim(item_idx)), batch))
+                    # stack all
+                    padded_item_lst = torch.stack(padded_item_lst, dim=0)
+                    padded_item_lst_map[key] = padded_item_lst
+
+            else:
+                max_len = max(map(lambda x: x[item_idx].shape[self.get_dim(item_idx)], batch))
+                # pad according to max_len
+                padded_item_lst = list(map(
+                    lambda x: pad_tensor(x[item_idx], pad=max_len, dim=self.get_dim(item_idx)), batch))
+                # stack all
+                padded_item_lst_map = torch.stack(padded_item_lst, dim=0)
+            ret.append(padded_item_lst_map)
         return ret
 
     def get_dim(self, item_idx):

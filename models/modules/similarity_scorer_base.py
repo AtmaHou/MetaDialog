@@ -336,7 +336,7 @@ class TapNetSimilarityScorer(SimilarityScorerBase):
         num_tags = support_targets.shape[-1]
         no_pad_num_tags = num_tags - 1
 
-        if no_pad_num_tags > len(self.anchor_reps) and (not label_reps or self.random_init):
+        if no_pad_num_tags > len(self.anchor_reps) and (label_reps is None or self.random_init):
             raise RuntimeError("Too few anchors")
 
         if label_reps is None and not self.random_init:

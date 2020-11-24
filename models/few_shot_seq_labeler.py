@@ -23,125 +23,107 @@ class FewShotSeqLabeler(torch.nn.Module):
         self.emission_scorer = emission_scorer
         self.transition_scorer = transition_scorer
         self.decoder = decoder
-        self.no_embedder_grad = opt.no_embedder_grad
-        self.label_mask = None
         self.config = config
         self.emb_log = emb_log
 
     def forward(
             self,
-            test_token_ids: torch.Tensor,
-            test_segment_ids: torch.Tensor,
-            test_nwp_index: torch.Tensor,
-            test_input_mask: torch.Tensor,
+            test_reps: torch.Tensor,
             test_output_mask: torch.Tensor,
-            support_token_ids: torch.Tensor,
-            support_segment_ids: torch.Tensor,
-            support_nwp_index: torch.Tensor,
-            support_input_mask: torch.Tensor,
+            support_reps: torch.Tensor,
             support_output_mask: torch.Tensor,
             test_target: torch.Tensor,
             support_target: torch.Tensor,
-            support_num: torch.Tensor,
+            label_mask: torch.Tensor = None,
     ):
         """
-        :param test_token_ids: (batch_size, test_len)
-        :param test_segment_ids: (batch_size, test_len)
-        :param test_nwp_index: (batch_size, test_len)
-        :param test_input_mask: (batch_size, test_len)
+        :param test_reps: (batch_size, test_len, emb_dim)
         :param test_output_mask: (batch_size, test_len)
-        :param support_token_ids: (batch_size, support_size, support_len)
-        :param support_segment_ids: (batch_size, support_size, support_len)
-        :param support_nwp_index: (batch_size, support_size, support_len)
-        :param support_input_mask: (batch_size, support_size, support_len)
+        :param support_reps: (batch_size, support_size, support_len, emb_dim)
         :param support_output_mask: (batch_size, support_size, support_len)
         :param test_target: index targets (batch_size, test_len)
         :param support_target: one-hot targets (batch_size, support_size, support_len, num_tags)
-        :param support_num: (batch_size, 1)
+        :param label_mask: the output label mask
         :return:
         """
-        # reps for tokens: (batch_size, support_size, nwp_sent_len, emb_len)
-        test_reps, support_reps = self.get_context_reps(
-            test_token_ids, test_segment_ids, test_nwp_index, test_input_mask, support_token_ids, support_segment_ids,
-            support_nwp_index, support_input_mask
-        )
-
         # calculate emission: shape(batch_size, test_len, no_pad_num_tag)
         emission = self.emission_scorer(test_reps, support_reps, test_output_mask, support_output_mask, support_target)
-
         logits = emission
 
         # as we remove pad label (id = 0), so all label id sub 1. And relu is used to avoid -1 index
         test_target = torch.nn.functional.relu(test_target - 1)
 
-        loss, prediction = torch.FloatTensor(0).to(test_target.device), None
         if self.transition_scorer:
             transitions, start_transitions, end_transitions = self.transition_scorer(test_reps, support_target)
 
-            if self.label_mask is not None:
-                transitions = self.mask_transition(transitions, self.label_mask)
+            if label_mask is not None:
+                transitions = self.mask_transition(transitions, label_mask)
 
             self.decoder: ConditionalRandomField
-            if self.training:
-                # the CRF staff
-                llh = self.decoder.forward(
-                    inputs=logits,
-                    transitions=transitions,
-                    start_transitions=start_transitions,
-                    end_transitions=end_transitions,
-                    tags=test_target,
-                    mask=test_output_mask)
-                loss = -1 * llh
-            else:
-                best_paths = self.decoder.viterbi_tags(logits=logits,
-                                                       transitions_without_constrain=transitions,
-                                                       start_transitions=start_transitions,
-                                                       end_transitions=end_transitions,
-                                                       mask=test_output_mask)
-                # split path and score
-                prediction, path_score = zip(*best_paths)
-                # we block pad label(id=0) before by - 1, here, we add 1 back
-                prediction = self.add_back_pad_label(prediction)
+            # the CRF staff
+            llh = self.decoder.forward(
+                inputs=logits,
+                transitions=transitions,
+                start_transitions=start_transitions,
+                end_transitions=end_transitions,
+                tags=test_target,
+                mask=test_output_mask)
+            loss = -1 * llh
+
         else:
             self.decoder: SequenceLabeler
-            if self.training:
-                loss = self.decoder.forward(logits=logits,
-                                            tags=test_target,
-                                            mask=test_output_mask)
-            else:
-                prediction = self.decoder.decode(logits=logits, masks=test_output_mask)
-                # we block pad label(id=0) before by - 1, here, we add 1 back
-                prediction = self.add_back_pad_label(prediction)
-        if self.training:
-            return loss
-        else:
-            return prediction
+            loss = self.decoder.forward(logits=logits,
+                                        tags=test_target,
+                                        mask=test_output_mask)
 
-    def get_context_reps(
-        self,
-            test_token_ids: torch.Tensor,
-            test_segment_ids: torch.Tensor,
-            test_nwp_index: torch.Tensor,
-            test_input_mask: torch.Tensor,
-            support_token_ids: torch.Tensor,
-            support_segment_ids: torch.Tensor,
-            support_nwp_index: torch.Tensor,
-            support_input_mask: torch.Tensor,
+        return loss
+
+    def decode(
+            self,
+            test_reps: torch.Tensor,
+            test_output_mask: torch.Tensor,
+            support_reps: torch.Tensor,
+            support_output_mask: torch.Tensor,
+            test_target: torch.Tensor,
+            support_target: torch.Tensor,
+            label_mask: torch.Tensor = None,
     ):
-        if self.no_embedder_grad:
-            self.context_embedder.eval()  # to avoid the dropout effect of reps model
-            self.context_embedder.requires_grad = False
+        """
+        :param test_reps: (batch_size, test_len, emb_dim)
+        :param test_output_mask: (batch_size, test_len)
+        :param support_reps: (batch_size, support_size, support_len, emb_dim)
+        :param support_output_mask: (batch_size, support_size, support_len)
+        :param test_target: index targets (batch_size, test_len)
+        :param support_target: one-hot targets (batch_size, support_size, support_len, num_tags)
+        :param label_mask: the output label mask
+        :return:
+        """
+        # calculate emission: shape(batch_size, test_len, no_pad_num_tag)
+        emission = self.emission_scorer(test_reps, support_reps, test_output_mask, support_output_mask, support_target)
+        logits = emission
+
+        if self.transition_scorer:
+            transitions, start_transitions, end_transitions = self.transition_scorer(test_reps, support_target)
+
+            if label_mask is not None:
+                transitions = self.mask_transition(transitions, label_mask)
+
+            self.decoder: ConditionalRandomField
+            best_paths = self.decoder.viterbi_tags(logits=logits,
+                                                   transitions_without_constrain=transitions,
+                                                   start_transitions=start_transitions,
+                                                   end_transitions=end_transitions,
+                                                   mask=test_output_mask)
+            # split path and score
+            prediction, path_score = zip(*best_paths)
+            # we block pad label(id=0) before by - 1, here, we add 1 back
+            prediction = self.add_back_pad_label(prediction)
         else:
-            self.context_embedder.train()  # to avoid the dropout effect of reps model
-            self.context_embedder.requires_grad = True
-        test_reps, support_reps, _, _ = self.context_embedder(
-            test_token_ids, test_segment_ids, test_nwp_index, test_input_mask, support_token_ids, support_segment_ids,
-            support_nwp_index, support_input_mask
-        )
-        if self.no_embedder_grad:
-            test_reps = test_reps.detach()  # detach the reps part from graph
-            support_reps = support_reps.detach()  # detach the reps part from graph
-        return test_reps, support_reps
+            self.decoder: SequenceLabeler
+            prediction = self.decoder.decode(logits=logits, masks=test_output_mask)
+            # we block pad label(id=0) before by - 1, here, we add 1 back
+            prediction = self.add_back_pad_label(prediction)
+        return prediction
 
     def add_back_pad_label(self, predictions: List[List[int]]):
         for pred in predictions:
@@ -171,133 +153,113 @@ class SchemaFewShotSeqLabeler(FewShotSeqLabeler):
 
     def forward(
             self,
-            test_token_ids: torch.Tensor,
-            test_segment_ids: torch.Tensor,
-            test_nwp_index: torch.Tensor,
-            test_input_mask: torch.Tensor,
+            test_reps: torch.Tensor,
             test_output_mask: torch.Tensor,
-            support_token_ids: torch.Tensor,
-            support_segment_ids: torch.Tensor,
-            support_nwp_index: torch.Tensor,
-            support_input_mask: torch.Tensor,
+            support_reps: torch.Tensor,
             support_output_mask: torch.Tensor,
             test_target: torch.Tensor,
             support_target: torch.Tensor,
-            support_num: torch.Tensor,
-            label_token_ids: torch.Tensor = None,
-            label_segment_ids: torch.Tensor = None,
-            label_nwp_index: torch.Tensor = None,
-            label_input_mask: torch.Tensor = None,
-            label_output_mask: torch.Tensor = None,
+            label_reps: torch.Tensor = None,
+            label_mask: torch.Tensor = None,
     ):
         """
         few-shot sequence labeler using schema information
-        :param test_token_ids: (batch_size, test_len)
-        :param test_segment_ids: (batch_size, test_len)
-        :param test_nwp_index: (batch_size, test_len)
-        :param test_input_mask: (batch_size, test_len)
+        :param test_reps: (batch_size, test_len, emb_dim)
         :param test_output_mask: (batch_size, test_len)
-        :param support_token_ids: (batch_size, support_size, support_len)
-        :param support_segment_ids: (batch_size, support_size, support_len)
-        :param support_nwp_index: (batch_size, support_size, support_len)
-        :param support_input_mask: (batch_size, support_size, support_len)
+        :param support_reps: (batch_size, support_size, support_len, emb_dim)
         :param support_output_mask: (batch_size, support_size, support_len)
         :param test_target: index targets (batch_size, test_len)
         :param support_target: one-hot targets (batch_size, support_size, support_len, num_tags)
-        :param support_num: (batch_size, 1)
-        :param label_token_ids:
-            if label_reps=cat:
-                (batch_size, label_num * label_des_len)
-            elif:
-                (batch_size, label_num, label_des_len)
-        :param label_segment_ids: same to label token ids
-        :param label_nwp_index: same to label token ids
-        :param label_input_mask: same to label token ids
-        :param label_output_mask: same to label token ids
+        :param label_reps: (batch_size, label_num, emb_dim)
+        :param label_mask: the output label mask
         :return:
         """
-        test_reps, support_reps = self.get_context_reps(
-            test_token_ids, test_segment_ids, test_nwp_index, test_input_mask,
-            support_token_ids, support_segment_ids, support_nwp_index, support_input_mask
-        )
-        # get label reps, shape (batch_size, max_label_num, emb_dim)
-        label_reps = self.get_label_reps(
-            label_token_ids, label_segment_ids, label_nwp_index, label_input_mask,
-        )
 
         # calculate emission: shape(batch_size, test_len, no_pad_num_tag)
-        # todo: Design new emission here
         emission = self.emission_scorer(test_reps, support_reps, test_output_mask, support_output_mask, support_target,
                                         label_reps)
-        if not self.training and self.emb_log:
-            self.emb_log.write('\n'.join(['test_target\t' + '\t'.join(map(str, one_target))
-                                          for one_target in test_target.tolist()]) + '\n')
-
         logits = emission
 
         # block pad of label_id = 0, so all label id sub 1. And relu is used to avoid -1 index
         test_target = torch.nn.functional.relu(test_target - 1)
 
         loss, prediction = torch.FloatTensor([0]).to(test_target.device), None
-        # todo: Design new transition here
         if self.transition_scorer:
             transitions, start_transitions, end_transitions = self.transition_scorer(test_reps, support_target, label_reps[0])
 
-            if self.label_mask is not None:
-                transitions = self.mask_transition(transitions, self.label_mask)
+            if label_mask is not None:
+                transitions = self.mask_transition(transitions, label_mask)
 
             self.decoder: ConditionalRandomField
-            if self.training:
-                # the CRF staff
-                llh = self.decoder.forward(
-                    inputs=logits,
-                    transitions=transitions,
-                    start_transitions=start_transitions,
-                    end_transitions=end_transitions,
-                    tags=test_target,
-                    mask=test_output_mask)
-                loss = -1 * llh
-            else:
-                best_paths = self.decoder.viterbi_tags(logits=logits,
-                                                       transitions_without_constrain=transitions,
-                                                       start_transitions=start_transitions,
-                                                       end_transitions=end_transitions,
-                                                       mask=test_output_mask)
-                # split path and score
-                prediction, path_score = zip(*best_paths)
-                # we block pad label(id=0) before by - 1, here, we add 1 back
-                prediction = self.add_back_pad_label(prediction)
+            # the CRF staff
+            llh = self.decoder.forward(
+                inputs=logits,
+                transitions=transitions,
+                start_transitions=start_transitions,
+                end_transitions=end_transitions,
+                tags=test_target,
+                mask=test_output_mask)
+            loss = -1 * llh
         else:
             self.decoder: SequenceLabeler
-            if self.training:
-                loss = self.decoder.forward(logits=logits,
-                                            tags=test_target,
-                                            mask=test_output_mask)
-            else:
-                prediction = self.decoder.decode(logits=logits, masks=test_output_mask)
-                # we block pad label(id=0) before by - 1, here, we add 1 back
-                prediction = self.add_back_pad_label(prediction)
-        if self.training:
-            return loss
-        else:
-            return prediction
+            loss = self.decoder.forward(logits=logits,
+                                        tags=test_target,
+                                        mask=test_output_mask)
+        return loss
 
-    def get_label_reps(
+    def decode(
             self,
-            label_token_ids: torch.Tensor,
-            label_segment_ids: torch.Tensor,
-            label_nwp_index: torch.Tensor,
-            label_input_mask: torch.Tensor,
-    ) -> torch.Tensor:
+            test_reps: torch.Tensor,
+            test_output_mask: torch.Tensor,
+            support_reps: torch.Tensor,
+            support_output_mask: torch.Tensor,
+            test_target: torch.Tensor,
+            support_target: torch.Tensor,
+            label_reps: torch.Tensor = None,
+            label_mask: torch.Tensor = None,
+    ):
         """
-        :param label_token_ids:
-        :param label_segment_ids:
-        :param label_nwp_index:
-        :param label_input_mask:
-        :return:  shape (batch_size, label_num, label_des_len)
+        few-shot sequence labeler using schema information
+        :param test_reps: (batch_size, test_len, emb_dim)
+        :param test_output_mask: (batch_size, test_len)
+        :param support_reps: (batch_size, support_size, support_len, emb_dim)
+        :param support_output_mask: (batch_size, support_size, support_len)
+        :param test_target: index targets (batch_size, test_len)
+        :param support_target: one-hot targets (batch_size, support_size, support_len, num_tags)
+        :param label_reps: (batch_size, label_num, emb_dim)
+        :param label_mask: the output label mask
+        :return:
         """
-        return self.context_embedder(
-            label_token_ids, label_segment_ids, label_nwp_index, label_input_mask,  reps_type='label')
+
+        # calculate emission: shape(batch_size, test_len, no_pad_num_tag)
+        emission = self.emission_scorer(test_reps, support_reps, test_output_mask, support_output_mask, support_target,
+                                        label_reps)
+        logits = emission
+
+        if self.transition_scorer:
+            transitions, start_transitions, end_transitions = self.transition_scorer(test_reps, support_target, label_reps[0])
+
+            if label_mask is not None:
+                transitions = self.mask_transition(transitions, label_mask)
+
+            self.decoder: ConditionalRandomField
+
+            best_paths = self.decoder.viterbi_tags(logits=logits,
+                                                   transitions_without_constrain=transitions,
+                                                   start_transitions=start_transitions,
+                                                   end_transitions=end_transitions,
+                                                   mask=test_output_mask)
+            # split path and score
+            prediction, path_score = zip(*best_paths)
+            # we block pad label(id=0) before by - 1, here, we add 1 back
+            prediction = self.add_back_pad_label(prediction)
+        else:
+            self.decoder: SequenceLabeler
+
+            prediction = self.decoder.decode(logits=logits, masks=test_output_mask)
+            # we block pad label(id=0) before by - 1, here, we add 1 back
+            prediction = self.add_back_pad_label(prediction)
+        return prediction
 
 
 def main():

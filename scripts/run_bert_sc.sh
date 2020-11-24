@@ -22,9 +22,8 @@ use_schema=--use_schema
 dataset_lst=($2 $3)
 support_shots_lst=(3)
 
-query_shot=8
-
-episode=100
+query_shot=4
+episode=50
 
 cross_data_id=0  # for smp
 
@@ -127,10 +126,6 @@ emb_log=
 #decoder_lst=(sms)
 #decoder_lst=(crf)
 #decoder_lst=(crf sms)
-#decoder_lst=(mlc)
-#decoder_lst=(eamlc)
-#decoder_lst=(msmlc)
-#decoder_lst=(krnmsmlc)
 
 # -------- SC decoder setting --------
 
@@ -223,8 +218,8 @@ do
                                                 ${tap_mlp} \
                                                 ${emb_log} \
                                                 ${do_div_emission} \
-                                                --transition learn \
-                                                --load_feature > ./sclog/${model_name}.DATA.${file_mark}.log
+                                                --transition learn > ./sclog/${model_name}.DATA.${file_mark}.log
+                                                # --load_feature > ./sclog/${model_name}.DATA.${file_mark}.log
                                             echo [CLI]
                                             echo Model: ${model_name}
                                             echo Task:  ${file_mark}

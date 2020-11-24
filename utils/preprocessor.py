@@ -15,13 +15,13 @@ FeatureItem = collections.namedtuple(   # text or raw features
     "FeatureItem",
     [
         "tokens",  # tokens corresponding to input token ids, eg: word_piece tokens with [CLS], [SEP]
-        "labels",  # labels for all input position, eg; label for word_piece tokens
+        "label_map",  # labels for all input position, eg; label for word_piece tokens
         "data_item",
         "token_ids",
         "segment_ids",
         "nwp_index",
         "input_mask",
-        "output_mask"
+        "output_mask_map"
     ]
 )
 
@@ -32,7 +32,7 @@ ModelInput = collections.namedtuple(  # digit features for computation
         "segment_ids",  # bert [SEP] ids
         "nwp_index",  # non-word-piece word index to extract non-word-piece tokens' reps (only useful for bert).
         "input_mask",  # [1] * len(sent), 1 for valid (tokens, cls, sep, word piece), 0 is padding in batch construction
-        "output_mask",  # [1] * len(sent), 1 for valid output, 0 for padding, eg: 1 for original tokens in sl task
+        "output_mask_map",  # [1] * len(sent), 1 for valid output, 0 for padding, eg: 1 for original tokens in sl task
     ]
 )
 
@@ -49,10 +49,10 @@ class FewShotFeature(object):
             test_feature_item: FeatureItem,
             support_input: ModelInput,
             support_feature_items: List[FeatureItem],
-            test_target: torch.Tensor,  # 1) CRF, shape: (1, test_len)  2)SMS, shape: (support_size, t_len, s_len)
-            support_target: torch.Tensor,  # 1) shape: (support_len, label_size)
-            label_input=None,
-            label_items=None,
+            test_target_map: Dict[str, List[torch.Tensor]],
+            support_target_map: Dict[str, List[torch.Tensor]],
+            label_input_map=None,
+            label_item_map=None,
     ):
         self.gid = gid
         self.test_gid = test_gid
@@ -61,15 +61,13 @@ class FewShotFeature(object):
         self.test_input = test_input  # shape: (1, test_len)
         self.support_input = support_input  # shape: (support_size, support_len)
         # output:
-        # 1)CRF, shape: (1, test_len)
-        # 2)SMS, shape: (support_size, test_len, support_len)
-        self.test_target = test_target
-        self.support_target = support_target
+        self.test_target_map = test_target_map
+        self.support_target_map = support_target_map
         ''' raw feature '''
         self.test_feature_item = test_feature_item
         self.support_feature_items = support_feature_items
-        self.label_input = label_input
-        self.label_items = label_items
+        self.label_input_map = label_input_map
+        self.label_item_map = label_item_map
 
     def __str__(self):
         return self.__repr__()
@@ -82,20 +80,24 @@ class InputBuilderBase:
     def __init__(self, tokenizer):
         self.tokenizer = tokenizer
 
-    def __call__(self, example, max_support_size, label2id
-    ) -> (FeatureItem, ModelInput, List[FeatureItem], ModelInput):
+    def __call__(self, example, max_support_size, label2id_map
+                 ) -> (FeatureItem, ModelInput, List[FeatureItem], ModelInput):
         raise NotImplementedError
 
     def data_item2feature_item(self, data_item: DataItem, seg_id: int) -> FeatureItem:
         raise NotImplementedError
 
     def get_test_model_input(self, feature_item: FeatureItem) -> ModelInput:
+        if isinstance(feature_item.output_mask_map, dict):
+            output_mask_map = {task: torch.LongTensor(map_item) for task, map_item in feature_item.output_mask_map.items()}
+        else:
+            output_mask_map = torch.LongTensor(feature_item.output_mask_map)
         ret = ModelInput(
             token_ids=torch.LongTensor(feature_item.token_ids),
             segment_ids=torch.LongTensor(feature_item.segment_ids),
             nwp_index=torch.LongTensor(feature_item.nwp_index),
             input_mask=torch.LongTensor(feature_item.input_mask),
-            output_mask=torch.LongTensor(feature_item.output_mask)
+            output_mask_map=output_mask_map
         )
         return ret
 
@@ -105,13 +107,20 @@ class InputBuilderBase:
         segment_ids = self.pad_support_set([f.segment_ids for f in feature_items], 0, max_support_size)
         nwp_index = self.pad_support_set([f.nwp_index for f in feature_items], [0], max_support_size)
         input_mask = self.pad_support_set([f.input_mask for f in feature_items], 0, max_support_size)
-        output_mask = self.pad_support_set([f.output_mask for f in feature_items], 0, max_support_size)
+        if isinstance(feature_items[0].output_mask_map, dict):
+            output_mask_map = {task: self.pad_support_set([f.output_mask_map[task] for f in feature_items],
+                                                          0, max_support_size)
+                               for task in feature_items[0].output_mask_map.keys()}
+            output_mask_map = {task: torch.LongTensor(output_mask) for task, output_mask in output_mask_map.items()}
+        else:
+            output_mask_map = self.pad_support_set([f.output_mask_map for f in feature_items], 0, max_support_size)
+            output_mask_map = torch.LongTensor(output_mask_map)
         ret = ModelInput(
             token_ids=torch.LongTensor(token_ids),
             segment_ids=torch.LongTensor(segment_ids),
             nwp_index=torch.LongTensor(nwp_index),
             input_mask=torch.LongTensor(input_mask),
-            output_mask=torch.LongTensor(output_mask)
+            output_mask_map=output_mask_map
         )
         return ret
 
@@ -156,7 +165,7 @@ class BertInputBuilder(InputBuilderBase):
         self.support_seg_id = 0 if opt.context_emb == 'sep_bert' else 1  # 1 to cat support and query to get reps
         self.seq_ins = {}
 
-    def __call__(self, example, max_support_size, label2id) -> (FeatureItem, ModelInput, List[FeatureItem], ModelInput):
+    def __call__(self, example, max_support_size, label2id_map) -> (FeatureItem, ModelInput, List[FeatureItem], ModelInput):
         test_feature_item, test_input = self.prepare_test(example)
         support_feature_items, support_input = self.prepare_support(example, max_support_size)
         return test_feature_item, test_input, support_feature_items, support_input
@@ -172,33 +181,44 @@ class BertInputBuilder(InputBuilderBase):
         support_input = self.get_support_model_input(support_feature_items, max_support_size)
         return support_feature_items, support_input
 
-    def data_item2feature_item(self, data_item: DataItem, seg_id: int) -> FeatureItem:
+    def data_item2feature_item(self, data_item: DataItem, seg_id: int, specify_task: str = None) -> FeatureItem:
         """ get feature_item for bert, steps: 1. do digitalizing 2. make mask """
         wp_mark, wp_text = self.tokenizing(data_item)
-        if self.opt.task == 'sl':  # use word-level labels  [opt.label_wp is supported by model now.]
-            labels = self.get_wp_label(data_item.seq_out, wp_text, wp_mark) if self.opt.label_wp else data_item.seq_out
-        else:  # use sentence level labels
-            labels = data_item.label
-            if 'None' not in labels:
-                # transfer label to index type such as `label_1`
-                if self.opt.index_label:
-                    labels = [self.opt.label2index_type[label] for label in labels]
-                if self.opt.unused_label:
-                    labels = [self.opt.label2unused_type[label] for label in labels]
+        if specify_task is not None:
+            if specify_task == 'sl':  # use word-level labels  [opt.label_wp is supported by model now.]
+                label_map = self.get_wp_label(data_item.seq_out, wp_text, wp_mark) if self.opt.label_wp else data_item.seq_out
+                output_mask_map = [1] * len(label_map)  # For sl: it is original tokens;
+            elif specify_task == 'sc':  # use sentence level labels
+                label_map = data_item.label
+                output_mask_map = [1] * len(label_map)  # For sc: it is labels
+            else:
+                raise TypeError('the specify task should be: `sl` or `sc`')
+        else:
+            label_map = {}
+            output_mask_map = {}
+            if 'sl' in self.opt.task:  # use word-level labels  [opt.label_wp is supported by model now.]
+                labels = self.get_wp_label(data_item.seq_out, wp_text, wp_mark) if self.opt.label_wp else data_item.seq_out
+                label_map['sl'] = labels
+                output_mask_map['sl'] = [1] * len(labels)  # For sl: it is original tokens;
+
+            if 'sc' in self.opt.task:  # use sentence level labels
+                labels = data_item.label
+                label_map['sc'] = labels
+                output_mask_map['sc'] = [1] * len(labels)  # For sc: it is labels
+
         tokens = ['[CLS]'] + wp_text + ['[SEP]'] if seg_id == 0 else wp_text + ['[SEP]']
         token_ids, segment_ids = self.digitizing_input(tokens=tokens, seg_id=seg_id)
         nwp_index = self.get_nwp_index(wp_mark)
         input_mask = [1] * len(token_ids)
-        output_mask = [1] * len(labels)   # For sl: it is original tokens; For sc: it is labels
         ret = FeatureItem(
             tokens=tokens,
-            labels=labels,
+            label_map=label_map,
             data_item=data_item,
             token_ids=token_ids,
             segment_ids=segment_ids,
             nwp_index=nwp_index,
             input_mask=input_mask,
-            output_mask=output_mask,
+            output_mask_map=output_mask_map,
         )
         return ret
 
@@ -234,45 +254,53 @@ class SchemaInputBuilder(BertInputBuilder):
     def __init__(self, tokenizer, opt):
         super(SchemaInputBuilder, self).__init__(tokenizer, opt)
 
-    def __call__(self, example, max_support_size, label2id) -> (FeatureItem, ModelInput, List[FeatureItem], ModelInput):
+    def __call__(self, example, max_support_size, label2id_map) -> (FeatureItem, ModelInput, List[FeatureItem], ModelInput):
         test_feature_item, test_input = self.prepare_test(example)
         support_feature_items, support_input = self.prepare_support(example, max_support_size)
         if self.opt.label_reps in ['cat']:  # represent labels by concat all all labels
-            label_input, label_items = self.prepare_label_feature(label2id)
+            label_input, label_items = self.prepare_label_feature(label2id_map)
         elif self.opt.label_reps in ['sep', 'sep_sum']:  # represent each label independently
-            label_input, label_items = self.prepare_sep_label_feature(label2id)
+            label_input, label_items = self.prepare_sep_label_feature(label2id_map)
+        else:
+            raise TypeError('the label_reps should be one of cat & set & sep_num')
         return test_feature_item, test_input, support_feature_items, support_input, label_items, label_input,
 
-    def prepare_label_feature(self, label2id: dict):
+    def prepare_label_feature(self, label2id_map: Dict[str, Dict[str, int]]):
         """ prepare digital input for label feature in concatenate style """
         text, wp_text, label, wp_label, wp_mark = [], [], [], [], []
-        sorted_labels = sorted(label2id.items(), key=lambda x: x[1])
-        for label_name, label_id in sorted_labels:
-            if label_name == '[PAD]':
-                continue
-            tmp_text = self.convert_label_name(label_name)
-            tmp_wp_text = self.tokenizer.tokenize(' '.join(tmp_text))
-            text.extend(tmp_text)
-            wp_text.extend(tmp_wp_text)
-            label.extend(['O'] * len(tmp_text))
-            wp_label.extend(['O'] * len(tmp_wp_text))
-            wp_mark.extend([0] + [1] * (len(tmp_wp_text) - 1))
-        label_item = self.data_item2feature_item(DataItem(text, label, wp_text, wp_label, wp_mark), 0)
-        label_input = self.get_test_model_input(label_item)
-        return label_input, label_item
+        sorted_label_map = {task: sorted(label2id.items(), key=lambda x: x[1])
+                            for task, label2id in label2id_map.items()}
+        label_item_map, label_input_map = {}, {}
+        for task, sorted_labels in sorted_label_map.items():
+            for label_name, label_id in sorted_labels:
+                if label_name == '[PAD]':
+                    continue
+                tmp_text = self.convert_label_name(label_name)
+                tmp_wp_text = self.tokenizer.tokenize(' '.join(tmp_text))
+                text.extend(tmp_text)
+                wp_text.extend(tmp_wp_text)
+                label.extend(['O'] * len(tmp_text))
+                wp_label.extend(['O'] * len(tmp_wp_text))
+                wp_mark.extend([0] + [1] * (len(tmp_wp_text) - 1))
+            label_item_map[task] = self.data_item2feature_item(DataItem(text, label, wp_text, wp_label, wp_mark), 0,
+                                                               task)
+            label_input_map[task] = self.get_test_model_input(label_item_map[task])
+        return label_input_map, label_item_map
 
-    def prepare_sep_label_feature(self, label2id):
+    def prepare_sep_label_feature(self, label2id_map):
         """ prepare digital input for label feature separately """
-        label_items = []
-        for label_name in label2id:
-            if label_name == '[PAD]':
-                continue
-            seq_in = self.convert_label_name(label_name)
-            seq_out = ['None'] * len(seq_in)
-            label = ['None']
-            label_items.append(self.data_item2feature_item(DataItem(seq_in, seq_out, label), 0))
-        label_input = self.get_support_model_input(label_items, len(label2id) - 1)  # no pad, so - 1
-        return label_input, label_items
+        label_item_map = {task: [] for task in label2id_map.keys()}
+        for task, label2id in label2id_map.items():
+            for label_name in label2id:
+                if label_name == '[PAD]':
+                    continue
+                seq_in = self.convert_label_name(label_name)
+                seq_out = ['None'] * len(seq_in)
+                label = ['None']
+                label_item_map[task].append(self.data_item2feature_item(DataItem(seq_in, seq_out, label), 0, task))
+        label_input_map = {task: self.get_support_model_input(label_items, len(label2id_map[task]) - 1)
+                           for task, label_items in label_item_map.items()}  # no pad, so - 1
+        return label_input_map, label_item_map
 
     def convert_label_name(self, name):
         text = []
@@ -326,8 +354,9 @@ class SchemaInputBuilder(BertInputBuilder):
 
 
 class NormalInputBuilder(InputBuilderBase):
-    def __init__(self, tokenizer):
+    def __init__(self, tokenizer, opt):
         super(NormalInputBuilder, self).__init__(tokenizer)
+        self.opt = opt
 
     def __call__(self, example, max_support_size, label2id) -> (FeatureItem, ModelInput, List[FeatureItem], ModelInput):
         test_feature_item = self.data_item2feature_item(data_item=example.test_data_item, seg_id=0)
@@ -339,20 +368,31 @@ class NormalInputBuilder(InputBuilderBase):
 
     def data_item2feature_item(self, data_item: DataItem, seg_id: int) -> FeatureItem:
         """ get feature_item for bert, steps: 1. do padding 2. do digitalizing 3. make mask """
-        tokens, labels = data_item.seq_in, data_item.seq_out
+        tokens = data_item.seq_in
+        label_map = {}
+        output_mask_map = {}
+        if 'sl' in self.opt.task:
+            labels = data_item.seq_out
+            label_map['sl'] = labels
+            output_mask_map['sl'] = [1] * len(labels)
+
+        if 'sc' in self.opt.task:
+            labels = data_item.label
+            label_map['sc'] = labels
+            output_mask_map['sc'] = [1] * len(labels)
+
         token_ids, segment_ids = self.digitizing_input(tokens=tokens, seg_id=seg_id)
         nwp_index = [[i] for i in range(len(token_ids))]
         input_mask = [1] * len(token_ids)
-        output_mask = [1] * len(data_item.seq_in)
         ret = FeatureItem(
             tokens=tokens,
-            labels=labels,
+            label_map=label_map,
             data_item=data_item,
             token_ids=token_ids,
             segment_ids=segment_ids,
             nwp_index=nwp_index,
             input_mask=input_mask,
-            output_mask=output_mask,
+            output_mask_map=output_mask_map,
         )
         return ret
 
@@ -396,18 +436,23 @@ class FewShotOutputBuilder(OutputBuilderBase):
         super(FewShotOutputBuilder, self).__init__()
 
     def __call__(self, test_feature_item: FeatureItem, support_feature_items: FeatureItem,
-                 label2id: dict, max_support_size: int):
-        test_target = self.item2label_ids(test_feature_item, label2id)
-        # to estimate emission, the support target is one-hot here
-        support_target = [self.item2label_onehot(f_item, label2id) for f_item in support_feature_items]
-        support_target = self.pad_support_set(support_target, self.label2onehot('[PAD]', label2id), max_support_size)
-        return torch.LongTensor(test_target), torch.LongTensor(support_target)
+                 label2id_map: Dict[str, Dict[str, int]], max_support_size: int):
+        test_target_map, support_target_map = {}, {}
+        for task, label2id in label2id_map.items():
+            test_target_map[task] = self.item2label_ids(test_feature_item, label2id, task)
+            # to estimate emission, the support target is one-hot here
+            support_target_map[task] = [self.item2label_onehot(f_item, label2id, task)
+                                        for f_item in support_feature_items]
+            support_target_map[task] = self.pad_support_set(support_target_map[task],
+                                                            self.label2onehot('[PAD]', label2id), max_support_size)
+        return {task: torch.LongTensor(item_test_target) for task, item_test_target in test_target_map.items()}, \
+               {task: torch.LongTensor(item_support_target) for task, item_support_target in support_target_map.items()}
 
-    def item2label_ids(self, f_item: FeatureItem, label2id: dict):
-        return [label2id[lb] for lb in f_item.labels]
+    def item2label_ids(self, f_item: FeatureItem, label2id: dict, task: str):
+        return [label2id[lb] for lb in f_item.label_map[task]]
 
-    def item2label_onehot(self, f_item: FeatureItem, label2id: dict):
-        return [self.label2onehot(lb, label2id) for lb in f_item.labels]
+    def item2label_onehot(self, f_item: FeatureItem, label2id: dict, task):
+        return [self.label2onehot(lb, label2id) for lb in f_item.label_map[task]]
 
     def label2onehot(self, label: str, label2id: dict):
         onehot = [0 for _ in range(len(label2id))]
@@ -440,12 +485,12 @@ class FeatureConstructor:
             self,
             examples: List[FewShotExample],
             max_support_size: int,
-            label2id: dict,
-            id2label: dict,
+            label2id_map: Dict[str, Dict[str, int]],
+            id2label_map: Dict[str, Dict[int, str]]
     ) -> List[FewShotFeature]:
         all_features = []
         for example in examples:
-            feature = self.example2feature(example, max_support_size, label2id, id2label)
+            feature = self.example2feature(example, max_support_size, label2id_map, id2label_map)
             all_features.append(feature)
         return all_features
 
@@ -453,13 +498,13 @@ class FeatureConstructor:
             self,
             example: FewShotExample,
             max_support_size: int,
-            label2id: dict,
-            id2label: dict
+            label2id_map: Dict[str, Dict[str, int]],
+            id2label_map: Dict[str, Dict[int, str]]
     ) -> FewShotFeature:
         test_feature_item, test_input, support_feature_items, support_input = self.input_builder(
-            example, max_support_size, label2id)
-        test_target, support_target = self.output_builder(
-            test_feature_item, support_feature_items, label2id, max_support_size)
+            example, max_support_size, label2id_map)
+        test_target_map, support_target_map = self.output_builder(
+            test_feature_item, support_feature_items, label2id_map, max_support_size)
         ret = FewShotFeature(
             gid=example.gid,
             test_gid=example.test_id,
@@ -468,8 +513,8 @@ class FeatureConstructor:
             test_feature_item=test_feature_item,
             support_input=support_input,
             support_feature_items=support_feature_items,
-            test_target=test_target,
-            support_target=support_target,
+            test_target_map=test_target_map,
+            support_target_map=support_target_map,
         )
         return ret
 
@@ -486,13 +531,13 @@ class SchemaFeatureConstructor(FeatureConstructor):
             self,
             example: FewShotExample,
             max_support_size: int,
-            label2id: dict,
-            id2label: dict
+            label2id_map: Dict[str, Dict[str, int]],
+            id2label_map: Dict[str, Dict[str, int]]
     ) -> FewShotFeature:
-        test_feature_item, test_input, support_feature_items, support_input, label_items, label_input = \
-            self.input_builder(example, max_support_size, label2id)
-        test_target, support_target = self.output_builder(
-            test_feature_item, support_feature_items, label2id, max_support_size)
+        test_feature_item, test_input, support_feature_items, support_input, label_item_map, label_input_map = \
+            self.input_builder(example, max_support_size, label2id_map)
+        test_target_map, support_target_map = self.output_builder(
+            test_feature_item, support_feature_items, label2id_map, max_support_size)
         ret = FewShotFeature(
             gid=example.gid,
             test_gid=example.test_id,
@@ -501,10 +546,10 @@ class SchemaFeatureConstructor(FeatureConstructor):
             test_feature_item=test_feature_item,
             support_input=support_input,
             support_feature_items=support_feature_items,
-            test_target=test_target,
-            support_target=support_target,
-            label_input=label_input,
-            label_items=label_items,
+            test_target_map=test_target_map,
+            support_target_map=support_target_map,
+            label_input_map=label_input_map,
+            label_item_map=label_item_map,
         )
         return ret
 
@@ -528,59 +573,35 @@ def make_dict(opt, examples: List[FewShotExample]) -> (Dict[str, int], Dict[int,
         return set([item.replace('B-', '').replace('I-', '') for item in l])
 
     ''' collect all label from: all test set & all support set '''
-    all_labels = []
-    label2id = {}
+    all_label_map = {task: [] for task in opt.task}
+    label2id_map = {task: {'[PAD]': 0} for task in opt.task}  # '[PAD]' in first position and id is 0
     for example in examples:
-        if opt.task == 'sl':
-            all_labels.append(example.test_data_item.seq_out)
-            all_labels.extend([data_item.seq_out for data_item in example.support_data_items])
-        else:
-            all_labels.append(example.test_data_item.label)
-            all_labels.extend([data_item.label for data_item in example.support_data_items])
+        if 'sl' in opt.task:
+            all_label_map['sl'].append(example.test_data_item.seq_out)
+            all_label_map['sl'].extend([data_item.seq_out for data_item in example.support_data_items])
+
+        if 'sc' in opt.task:
+            all_label_map['sc'].append(example.test_data_item.label)
+            all_label_map['sc'].extend([data_item.label for data_item in example.support_data_items])
     ''' collect label word set '''
-    label_set = sorted(list(purify(set(flatten(all_labels)))))  # sort to make embedding id fixed
-    # transfer label to index type such as `label_1`
-    if opt.index_label:
-        if 'label2index_type' not in opt:
-            opt.label2index_type = {}
-            for idx, label in enumerate(label_set):
-                opt.label2index_type[label] = 'label_' + str(idx)
-        else:
-            max_label_idx = max([int(value.replace('label_', '')) for value in opt.label2index_type.values()])
-            for label in label_set:
-                if label not in opt.label2index_type:
-                    max_label_idx += 1
-                    opt.label2index_type[label] = 'label_' + str(max_label_idx)
-        label_set = [opt.label2index_type[label] for label in label_set]
-    elif opt.unused_label:
-        if 'label2unused_type' not in opt:
-            opt.label2unused_type = {}
-            for idx, label in enumerate(label_set):
-                opt.label2unused_type[label] = '[unused' + str(idx) + ']'
-        else:
-            max_label_idx = max([int(value.replace('[unused', '').replace(']', '')) for value in opt.label2unused_type.values()])
-            for label in label_set:
-                if label not in opt.label2unused_type:
-                    max_label_idx += 1
-                    opt.label2unused_type[label] = '[unused' + str(max_label_idx) + ']'
-        label_set = [opt.label2unused_type[label] for label in label_set]
-    else:
-        pass
+    # sort to make embedding id fixed
+    label_set_map = {task: sorted(list(purify(set(flatten(item_label))))) for task, item_label in all_label_map.items()}
     ''' build dict '''
-    label2id['[PAD]'] = len(label2id)  # '[PAD]' in first position and id is 0
-    if opt.task == 'sl':
-        label2id['O'] = len(label2id)
-        for label in label_set:
+    if 'sl' in opt.task:
+        label2id_map['sl']['O'] = len(label2id_map['sl'])
+        for label in label_set_map['sl']:
             if label == 'O':
                 continue
-            label2id['B-' + label] = len(label2id)
-            label2id['I-' + label] = len(label2id)
-    else:  # sc
-        for label in label_set:
-            label2id[label] = len(label2id)
+            label2id_map['sl']['B-' + label] = len(label2id_map['sl'])
+            label2id_map['sl']['I-' + label] = len(label2id_map['sl'])
+
+    if 'sc' in opt.task:
+        for label in label_set_map['sc']:
+            label2id_map['sc'][label] = len(label2id_map['sc'])
+
     ''' reverse the label2id '''
-    id2label = dict([(idx, label) for label, idx in label2id.items()])
-    return label2id, id2label
+    id2label_map = {task: dict([(idx, label) for label, idx in label2id_map[task].items()]) for task in opt.task}
+    return label2id_map, id2label_map
 
 
 def make_word_dict(all_files: List[str]) -> (Dict[str, int], Dict[int, str]):
@@ -607,12 +628,12 @@ def make_mask(token_ids: torch.Tensor, label_ids: torch.Tensor) -> (torch.Tensor
     return input_mask, output_mask
 
 
-def save_feature(path, features, label2id, id2label):
+def save_feature(path, features, label2id_map, id2label_map):
     with open(path, 'wb') as writer:
         saved_features = {
             'features': features,
-            'label2id': label2id,
-            'id2label': id2label,
+            'label2id': label2id_map,
+            'id2label': id2label_map,
         }
         pickle.dump(saved_features, writer)
 

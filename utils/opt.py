@@ -39,8 +39,10 @@ def basic_args(parser):
                        help="path to embedding cache dir. if use pytorch nlp, use this path to avoid downloading")
 
     group = parser.add_argument_group('Function')
-    parser.add_argument("--task", default='sc', choices=['sl', 'sc'],
-                        help="Task: sl:sequence labeling, sc:single label sent classify")
+    # parser.add_argument("--task", default='sc', choices=['sl', 'sc'],
+    #                     help="Task: sl:sequence labeling, sc:single label sent classify")
+    parser.add_argument("--task", nargs='+', type=str,
+                        help="Task: sl:sequence labeling, sc:single label sent classify. We can specify multiple tasks")
     group.add_argument('--allow_override', default=False, action='store_true', help='allow override experiment file')
     group.add_argument('--load_feature', default=False, action='store_true', help='load feature from file')
     group.add_argument('--save_feature', default=False, action='store_true', help='save feature to file')
@@ -129,6 +131,8 @@ def test_args(parser):
     group = parser.add_argument_group('Test')
     group.add_argument("--test_batch_size", default=2, type=int, help="Must same to few-shot batch size now")
     group.add_argument("--test_on_cpu", default=False, action='store_true', help="eval on cpu")
+    group.add_argument("--judge_joint_success", default=False, action='store_true',
+                       help="set the eval method to judge joint score with joint success")
 
     return parser
 
@@ -154,9 +158,9 @@ def model_args(parser):
                        help="decode method")
 
     # ===== emission layer setting =========
-    group.add_argument("--emission", default='mnet', type=str,
-                       choices=['mnet', 'rank', 'proto', 'proto_with_label', 'tapnet'],
-                       help="Method for calculate emission score")
+    group.add_argument("--emission", nargs="+", type=str,
+                       # choices=['mnet', 'rank', 'proto', 'proto_with_label', 'tapnet'],
+                       help="Method for calculate emission score, match with task list")
     group.add_argument("-e_nm", "--emission_normalizer", type=str, default='', choices=['softmax', 'norm', 'none'],
                        help="normalize emission into 1-0")
     group.add_argument("-e_scl", "--emission_scaler", type=str, default=None,

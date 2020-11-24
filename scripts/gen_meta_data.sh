@@ -44,8 +44,8 @@ use_fix_support=--use_fix_support
 # ======= default path (for quick distribution) ==========
 #input_dir=/Users/lyk/Work/Dialogue/FewShot/SMP正式数据集/
 #output_dir=/Users/lyk/Work/Dialogue/FewShot/SMP正式数据集/SmpMetaData/
-input_dir=/Users/lyk/Work/Dialogue/FewShot/SMP/
-output_dir=/Users/lyk/Work/Dialogue/FewShot/SMP/smp2/
+input_dir=/Users/lyk/Work/Dialogue/FewShot/SMP/smp_data/
+output_dir=/Users/lyk/Work/Dialogue/FewShot/SMP/smp_data/smp_episode_data/
 
 echo \[START\] set jobs on dataset \[ ${dataset_lst[@]} \]
 # === Loop for all case and run ===

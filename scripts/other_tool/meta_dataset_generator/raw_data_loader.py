@@ -343,11 +343,52 @@ class SMPDataLoader(RawDataLoaderBase):
             a dict store support data: {"partition/domain name" : { 'seq_ins':[], 'labels'[]:, 'seq_outs':[]}}
         """
         print('Start loading SMP (Chinese) data from: ', path)
+        train_data = self.load_normal_data(os.path.join(path, 'train'))
+        dev_data = self.load_normal_data(os.path.join(path, 'dev'))
+        support_data, test_data = self.load_support_test_data(os.path.join(path, 'test'))
+        return {'train': train_data, 'dev': dev_data, 'support': support_data, 'test': test_data}
+
+        # all_data = {}
+        #
+        # all_files = [os.path.join(path, 'train', filename) for filename in path if filename.endswith('.json')]
+        #
+        # for one_file in all_files:
+        #     part_data = self.unpack_train_data(one_file)
+        #
+        #     for domain, data in part_data.items():
+        #         if domain not in all_data:
+        #             all_data[domain] = {"seq_ins": [], "seq_outs": [], "labels": []}
+        #         all_data[domain]['seq_ins'].extend(part_data[domain]['seq_ins'])
+        #         all_data[domain]['seq_outs'].extend(part_data[domain]['seq_outs'])
+        #         all_data[domain]['labels'].extend(part_data[domain]['labels'])
+        # return all_data
+
+        # dev_data, support_data = {}, {}
+        # if with_dev:
+        #     dev_support_files = [os.path.join(path, 'dev/support', filename)
+        #                          for filename in os.listdir(os.path.join(path, 'dev/support'))
+        #                          if filename.endswith('.json')]
+        #     support_data, support_text_set = self.unpack_support_data(dev_support_files)
+        #
+        #     dev_all_files = [os.path.join(path, 'dev/correct', filename)
+        #                      for filename in os.listdir(os.path.join(path, 'dev/correct'))
+        #                      if filename.endswith('.json')]
+        #     for one_file in dev_all_files:
+        #         part_data = self.unpack_train_data(one_file, support_text_set)
+        #
+        #         for domain, data in part_data.items():
+        #             if domain not in all_data:
+        #                 dev_data[domain] = {"seq_ins": [], "seq_outs": [], "labels": []}
+        #             dev_data[domain]['seq_ins'].extend(part_data[domain]['seq_ins'])
+        #             dev_data[domain]['seq_outs'].extend(part_data[domain]['seq_outs'])
+        #             dev_data[domain]['labels'].extend(part_data[domain]['labels'])
+        #
+        # return {'train': all_data, 'dev': dev_data, 'support': support_data}
+
+    def load_normal_data(self, path: str):
         all_data = {}
-
-        all_files = [os.path.join(path, 'train', filename)
-                     for filename in os.listdir(os.path.join(path, 'train')) if filename.endswith('.json')]
-
+        all_files = [os.path.join(path, filename) for filename in os.listdir(path) if filename.endswith('.json')]
+        print('all_files: {} - {}'.format(path, all_files))
         for one_file in all_files:
             part_data = self.unpack_train_data(one_file)
 
@@ -357,28 +398,30 @@ class SMPDataLoader(RawDataLoaderBase):
                 all_data[domain]['seq_ins'].extend(part_data[domain]['seq_ins'])
                 all_data[domain]['seq_outs'].extend(part_data[domain]['seq_outs'])
                 all_data[domain]['labels'].extend(part_data[domain]['labels'])
+        return all_data
 
-        dev_data, support_data = {}, {}
-        if with_dev:
-            dev_support_files = [os.path.join(path, 'dev/support', filename)
-                                 for filename in os.listdir(os.path.join(path, 'dev/support'))
-                                 if filename.endswith('.json')]
-            support_data, support_text_set = self.unpack_support_data(dev_support_files)
+    def load_support_test_data(self, path, support_folder_name='support', test_folder_name='correct'):
+        support_files = [os.path.join(path, support_folder_name, filename)
+                         for filename in os.listdir(os.path.join(path, support_folder_name))
+                         if filename.endswith('.json')]
+        support_data, support_text_set = self.unpack_support_data(support_files)
 
-            dev_all_files = [os.path.join(path, 'dev/correct', filename)
-                             for filename in os.listdir(os.path.join(path, 'dev/correct'))
-                             if filename.endswith('.json')]
-            for one_file in dev_all_files:
-                part_data = self.unpack_train_data(one_file, support_text_set)
+        test_files = [os.path.join(path, test_folder_name, filename)
+                      for filename in os.listdir(os.path.join(path, test_folder_name))
+                      if filename.endswith('.json')]
 
-                for domain, data in part_data.items():
-                    if domain not in all_data:
-                        dev_data[domain] = {"seq_ins": [], "seq_outs": [], "labels": []}
-                    dev_data[domain]['seq_ins'].extend(part_data[domain]['seq_ins'])
-                    dev_data[domain]['seq_outs'].extend(part_data[domain]['seq_outs'])
-                    dev_data[domain]['labels'].extend(part_data[domain]['labels'])
+        test_data = {}
+        for one_file in test_files:
+            part_data = self.unpack_train_data(one_file)
 
-        return {'train': all_data, 'dev': dev_data, 'support': support_data}
+            for domain, data in part_data.items():
+                if domain not in test_data:
+                    test_data[domain] = {"seq_ins": [], "seq_outs": [], "labels": []}
+                test_data[domain]['seq_ins'].extend(part_data[domain]['seq_ins'])
+                test_data[domain]['seq_outs'].extend(part_data[domain]['seq_outs'])
+                test_data[domain]['labels'].extend(part_data[domain]['labels'])
+
+        return support_data, test_data
 
     def unpack_support_data(self, all_data_path):
         support_data = {}
@@ -428,24 +471,25 @@ class SMPDataLoader(RawDataLoaderBase):
         text = item['text'].replace(' ', '')
         seq_in = list(text)
 
-        slots = item['slots']
         seq_out = ['O'] * len(seq_in)
-        for slot_key, slot_value in slots.items():
-            if not isinstance(slot_value, list):
-                slot_value = [slot_value]
-            for s_val in slot_value:
-                s_val = s_val.replace(' ', '')
-                if s_val in text:
-                    s_idx = text.index(s_val)
-                    s_end = s_idx + len(s_val)
-                    seq_out[s_idx] = 'B-' + slot_key
-                    for idx in range(s_idx + 1, s_end):
-                        seq_out[idx] = 'I-' + slot_key
-                else:
-                    print('text: {}'.format(text))
-                    print('  slot_key: {} - slot_value: {}'.format(slot_key, s_val))
+        if 'slots' in item:
+            slots = item['slots']
+            for slot_key, slot_value in slots.items():
+                if not isinstance(slot_value, list):
+                    slot_value = [slot_value]
+                for s_val in slot_value:
+                    s_val = s_val.replace(' ', '')
+                    if s_val in text:
+                        s_idx = text.index(s_val)
+                        s_end = s_idx + len(s_val)
+                        seq_out[s_idx] = 'B-' + slot_key
+                        for idx in range(s_idx + 1, s_end):
+                            seq_out[idx] = 'I-' + slot_key
+                    else:
+                        print('text: {}'.format(text))
+                        print('  slot_key: {} - slot_value: {}'.format(slot_key, s_val))
 
-        label = item['intent']
+        label = item['intent'] if 'intent' in item else 'O'
 
         return seq_in, seq_out, label
 
@@ -460,11 +504,11 @@ if __name__ == '__main__':
     opt.dataset = 'smp'
     opt.label_type = 'intent'
 
-    smp_path = '/Users/lyk/Work/Dialogue/FewShot/SMP/'
+    smp_path = '/Users/lyk/Work/Dialogue/FewShot/SMP/smp_data/'
     smp_loader = SMPDataLoader(opt)
 
     smp_data = smp_loader.load_data(path=smp_path)
-    train_data, dev_data, support_data = smp_data['train'], smp_data['dev'], smp_data['support']
+    train_data, dev_data, support_data, test_data = smp_data['train'], smp_data['dev'], smp_data['support'], smp_data['test']
 
     print("train: smp domain number: {}".format(len(train_data)))
     print("train: all smp domain: {}".format(train_data.keys()))
