@@ -50,7 +50,7 @@ class SLUDataLoader(RawDataLoaderBase):
                 for line in reader:
                     all_data['labels'].append(line.replace('\n', '').split('#'))
         if self.opt.intent_as_domain and self.opt.task == 'sl':  # re-split data by regarding label/intent as domain
-            return self.split_data_by_intent()
+            return self.split_data_by_intent(all_data)
         return {self.opt.dataset: all_data}
 
     def split_data_by_intent(self, all_data):
@@ -343,11 +343,17 @@ class SMPDataLoader(RawDataLoaderBase):
             a dict store support data: {"partition/domain name" : { 'seq_ins':[], 'labels'[]:, 'seq_outs':[]}}
         """
         print('Start loading SMP (Chinese) data from: ', path)
+        train_data = self.load_normal_data(os.path.join(path, 'train'))
+        # dev_data = self.load_normal_data(os.path.join(path, 'dev'))
+        dev_support_data, dev_data = self.load_support_test_data(os.path.join(path, 'dev'))
+        test_support_data, test_data = self.load_support_test_data(os.path.join(path, 'test'))
+        return {'train': train_data, 'dev': {'support': dev_support_data, 'query': dev_data},
+                'test': {'support': test_support_data, 'query': test_data}}
+
+    def load_normal_data(self, path: str):
         all_data = {}
-
-        all_files = [os.path.join(path, 'train', filename)
-                     for filename in os.listdir(os.path.join(path, 'train')) if filename.endswith('.json')]
-
+        all_files = [os.path.join(path, filename) for filename in os.listdir(path) if filename.endswith('.json')]
+        print('all_files: {} - {}'.format(path, all_files))
         for one_file in all_files:
             part_data = self.unpack_train_data(one_file)
 
@@ -357,28 +363,30 @@ class SMPDataLoader(RawDataLoaderBase):
                 all_data[domain]['seq_ins'].extend(part_data[domain]['seq_ins'])
                 all_data[domain]['seq_outs'].extend(part_data[domain]['seq_outs'])
                 all_data[domain]['labels'].extend(part_data[domain]['labels'])
+        return all_data
 
-        dev_data, support_data = {}, {}
-        if with_dev:
-            dev_support_files = [os.path.join(path, 'dev/support', filename)
-                                 for filename in os.listdir(os.path.join(path, 'dev/support'))
-                                 if filename.endswith('.json')]
-            support_data, support_text_set = self.unpack_support_data(dev_support_files)
+    def load_support_test_data(self, path, support_folder_name='support', test_folder_name='correct'):
+        support_files = [os.path.join(path, support_folder_name, filename)
+                         for filename in os.listdir(os.path.join(path, support_folder_name))
+                         if filename.endswith('.json')]
+        support_data, support_text_set = self.unpack_support_data(support_files)
 
-            dev_all_files = [os.path.join(path, 'dev/correct', filename)
-                             for filename in os.listdir(os.path.join(path, 'dev/correct'))
-                             if filename.endswith('.json')]
-            for one_file in dev_all_files:
-                part_data = self.unpack_train_data(one_file, support_text_set)
+        test_files = [os.path.join(path, test_folder_name, filename)
+                      for filename in os.listdir(os.path.join(path, test_folder_name))
+                      if filename.endswith('.json')]
 
-                for domain, data in part_data.items():
-                    if domain not in all_data:
-                        dev_data[domain] = {"seq_ins": [], "seq_outs": [], "labels": []}
-                    dev_data[domain]['seq_ins'].extend(part_data[domain]['seq_ins'])
-                    dev_data[domain]['seq_outs'].extend(part_data[domain]['seq_outs'])
-                    dev_data[domain]['labels'].extend(part_data[domain]['labels'])
+        test_data = {}
+        for one_file in test_files:
+            part_data = self.unpack_train_data(one_file)
 
-        return {'train': all_data, 'dev': dev_data, 'support': support_data}
+            for domain, data in part_data.items():
+                if domain not in test_data:
+                    test_data[domain] = {"seq_ins": [], "seq_outs": [], "labels": []}
+                test_data[domain]['seq_ins'].extend(part_data[domain]['seq_ins'])
+                test_data[domain]['seq_outs'].extend(part_data[domain]['seq_outs'])
+                test_data[domain]['labels'].extend(part_data[domain]['labels'])
+
+        return support_data, test_data
 
     def unpack_support_data(self, all_data_path):
         support_data = {}
@@ -392,12 +400,13 @@ class SMPDataLoader(RawDataLoaderBase):
 
             for item in json_data:
                 domain = item['domain']
-                support_text_set.add(item['text'])
 
                 if domain not in support_data:
                     support_data[domain] = {"seq_ins": [], "seq_outs": [], "labels": []}
 
                 seq_in, seq_out, label = self.handle_one_utterance(item)
+
+                support_text_set.add(''.join(seq_in))
 
                 support_data[domain]['seq_ins'].append(seq_in)
                 support_data[domain]['seq_outs'].append(seq_out)
@@ -425,29 +434,51 @@ class SMPDataLoader(RawDataLoaderBase):
         return part_data
 
     def handle_one_utterance(self, item):
-        text = item['text'].replace(' ', '')
+        # text = item['text'].replace(' ', '')
+        text = re.sub(r"\s+", "", item['text'])
         seq_in = list(text)
 
-        slots = item['slots']
         seq_out = ['O'] * len(seq_in)
-        for slot_key, slot_value in slots.items():
-            if not isinstance(slot_value, list):
-                slot_value = [slot_value]
-            for s_val in slot_value:
-                s_val = s_val.replace(' ', '')
-                if s_val in text:
-                    s_idx = text.index(s_val)
-                    s_end = s_idx + len(s_val)
-                    seq_out[s_idx] = 'B-' + slot_key
-                    for idx in range(s_idx + 1, s_end):
-                        seq_out[idx] = 'I-' + slot_key
+        if 'slots' in item:
+            slots = item['slots']
+            for slot_key, slot_value in slots.items():
+                if not isinstance(slot_value, list):
+                    if isinstance(slot_value, dict):
+                        slot_value = self.flat_dict(slot_key, slot_value)
+                    else:
+                        slot_value = [(slot_key, slot_value)]
                 else:
-                    print('text: {}'.format(text))
-                    print('  slot_key: {} - slot_value: {}'.format(slot_key, s_val))
+                    slot_value = [(slot_key, s_val) for s_val in slot_value]
+                for (s_key, s_val) in slot_value:
+                    s_val = s_val.replace(' ', '')
+                    if s_val in text:
+                        s_idx = text.index(s_val)
+                        s_end = s_idx + len(s_val)
+                        seq_out[s_idx] = 'B-' + s_key
+                        for idx in range(s_idx + 1, s_end):
+                            seq_out[idx] = 'I-' + s_key
+                    else:
+                        print('text: {}'.format(text))
+                        print('  slot_key: {} - slot_value: {}'.format(s_key, s_val))
 
-        label = item['intent']
+        label = item['intent'] if 'intent' in item else 'O'
+        if 'intent' not in item:
+            print('error: item: {}'.format(item))
 
         return seq_in, seq_out, label
+
+    def flat_dict(self, prefix_key: str, data: dict):
+        slots_lst = []
+        for k, v in data.items():
+            if isinstance(v, dict):
+                slots_lst.extend(self.flat_dict(prefix_key + '-' + k, v))
+            else:
+                if isinstance(v, list):
+                    for v1 in v:
+                        slots_lst.append((prefix_key + '-' + k, v1))
+                else:
+                    slots_lst.append((prefix_key + '-' + k, v))
+        return slots_lst
 
 
 if __name__ == '__main__':
