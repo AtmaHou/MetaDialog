@@ -76,6 +76,8 @@ class MiniIncludeGenerator(DataGeneratorBase):
                 abandoned_domains.append([domain_name, len(domain_data['labels'])])
                 continue
 
+            domain_data = self.add_slu_labels(domain_data)
+
             label_bucket, d_id2label = self.get_label_bucket(domain_data)
             all_labels, del_labels = self.get_all_label_set(label_bucket)  # get all label and filter bad labels
 
@@ -86,12 +88,41 @@ class MiniIncludeGenerator(DataGeneratorBase):
                 label_set = self.sample_label_set(all_labels)
                 support_set, remained_data = self.sample_support_set(domain_data, label_set, label_bucket, d_id2label)
                 query_set = self.get_query_set(domain_data if self.opt.dup_query else remained_data, label_set)
+                del support_set['slu_labels']
+                del query_set['slu_labels']
                 episodes.append({'support': support_set, 'query': query_set})
                 if episode_id % 100 == 0:
                     print('\tDomain:', domain_name, episode_id, 'episodes finished')
             one_domain_few_shot_data = episodes
             few_shot_data[domain_name] = one_domain_few_shot_data
+        print('abandoned_domains: {}'.format(abandoned_domains))
         return few_shot_data
+
+    def check_all_O(self, slots):
+        flag = True
+        for slot in slots:
+            if slot != 'O':
+                flag = False
+                break
+        return flag
+
+    def add_slu_labels(self, domain_data):
+        domain_data['slu_labels'] = []
+        for d_id in range(len(domain_data['seq_ins'])):
+            if isinstance(domain_data['labels'][d_id], list):
+                label = domain_data['labels'][d_id][0]
+            else:
+                label = domain_data['labels'][d_id]
+            if not self.check_all_O(domain_data['seq_outs'][d_id]):
+                slu_labels = [label + '-' + slot for slot in domain_data['seq_outs'][d_id]]
+            else:
+                slu_labels = [label for _ in domain_data['seq_outs'][d_id]]
+            domain_data['slu_labels'].append(slu_labels)
+            if d_id < 3:
+                print('{} - labels: {}'.format(d_id, domain_data['labels'][d_id]))
+                print('{} - seq_outs: {}'.format(d_id, domain_data['seq_outs'][d_id]))
+                print('{} - slu_labels: {}'.format(d_id, domain_data['slu_labels'][d_id]))
+        return domain_data
 
     def del_samples_in_label_bucket(self, label_bucket: Dict[str, List[int]], del_labels: List[str]):
         """
@@ -124,6 +155,8 @@ class MiniIncludeGenerator(DataGeneratorBase):
             label_field = 'seq_outs'
         elif self.opt.task == 'sc':  # use sentence labels
             label_field = 'labels'
+        elif self.opt.task == 'slu':  # use sentence labels and token labels
+            label_field = 'slu_labels'
         else:
             raise ValueError('Wrong task in args: {}!'.format(self.opt.task))
         for d_id in range(len(domain_data['seq_ins'])):
@@ -175,7 +208,7 @@ class MiniIncludeGenerator(DataGeneratorBase):
                     dup_sample_id = random.choice(tmp_sample_ids)
                     tmp_sample_ids.append(dup_sample_id)
                 tmp_label_bucket[label] = tmp_sample_ids
-        print({k: len(v) for k, v in tmp_label_bucket.items()})
+        # print({k: len(v) for k, v in tmp_label_bucket.items()})
 
         ''' Step1: Sample learning shots, and record the selected data's id '''
         for label in label_set:
@@ -203,32 +236,54 @@ class MiniIncludeGenerator(DataGeneratorBase):
         num_after = len(selected_data_ids)
 
         ''' Pick data item by selected id '''
-        selected_data = {'seq_ins': [], 'labels': [], 'seq_outs': []}
-        remained_data = {'seq_ins': [], 'labels': [], 'seq_outs': []}
+        selected_data = {'seq_ins': [], 'labels': [], 'seq_outs': [], 'slu_labels': []}
+        remained_data = {'seq_ins': [], 'labels': [], 'seq_outs': [], 'slu_labels': []}
         for d_id in range(len(data_part['seq_ins'])):
-            s_in, s_out, lb = data_part['seq_ins'][d_id], data_part['seq_outs'][d_id], data_part['labels'][d_id]
+            s_in, s_out, lb, slu_lb = data_part['seq_ins'][d_id], data_part['seq_outs'][d_id], data_part['labels'][d_id], data_part['slu_labels'][d_id]
             if d_id in selected_data_ids:  # decide where data go
                 repeat_num = selected_data_ids.count(d_id)
                 while repeat_num:
                     if self.opt.way > 0:  # remove non-label_set labels
-                        s_out, lb = self.remove_out_set_labels(s_out, lb, label_set)
-                    self.add_data_to_set(selected_data, s_in, s_out, lb)
+                        s_out, lb, slu_lb = self.remove_out_set_labels(s_out, lb, slu_lb, label_set)
+                    self.add_data_to_set(selected_data, s_in, s_out, lb, slu_lb)
                     repeat_num -= 1
             else:
-                self.add_data_to_set(remained_data, s_in, s_out, lb)
+                self.add_data_to_set(remained_data, s_in, s_out, lb, slu_lb)
 
         if self.opt.check:
+            # print('in support check...')
             # check support shot
-            selected_labels = list(itertools.chain.from_iterable(selected_data['labels']))
-            label_shots = Counter(selected_labels)
-            error_shot = False
-            for lb, s in label_shots.items():
-                if s < self.opt.support_shots:
-                    error_shot = True
-                    print("Error: Lack shots:", lb, s)
-            if error_shot:
-                raise RuntimeError('Error in support shot number.')
+            if self.opt.task in ['sc', 'slu']:
+                selected_labels = list(itertools.chain.from_iterable(selected_data['labels']))
+                label_shots = Counter(selected_labels)
+                error_shot = False
+                for lb, s in label_shots.items():
+                    if s < self.opt.support_shots:
+                        error_shot = True
+                        print("Error: Lack shots of intent:", lb, s)
+                if error_shot:
+                    raise RuntimeError('Error in support shot number of intent.')
 
+            if self.opt.task in ['sl', 'slu']:
+                selected_labels = list(itertools.chain.from_iterable(selected_data['seq_outs']))
+                label_shots = Counter(selected_labels)
+                error_shot = False
+                for lb, s in label_shots.items():
+                    if s < self.opt.support_shots:
+                        error_shot = True
+                        print("Error: Lack shots of slot:", lb, s)
+                if error_shot:
+                    raise RuntimeError('Error in support shot number of slot.')
+
+            if self.opt.task == 'sl':  # use token labels
+                label_field = 'seq_outs'
+            elif self.opt.task == 'sc':  # use sentence labels
+                label_field = 'labels'
+            elif self.opt.task == 'slu':  # use sentence labels and token labels
+                label_field = 'slu_labels'
+            else:
+                raise ValueError('Wrong task in args: {}!'.format(self.opt.task))
+            selected_labels = list(itertools.chain.from_iterable(selected_data[label_field]))
             # all label must appear in support set and no label appeared out of label set.
             diff = (set(selected_labels) - set(label_set)) | (set(label_set) - set(selected_labels))
             if diff:
@@ -240,22 +295,33 @@ class MiniIncludeGenerator(DataGeneratorBase):
     def get_query_set(self, data_part, label_set):
         idxes = list(range(len(data_part['seq_ins'])))
         random.shuffle(idxes)
-        query_set = {'seq_ins': [], 'labels': [], 'seq_outs': []}
+        query_set = {'seq_ins': [], 'labels': [], 'seq_outs': [], 'slu_labels': []}
         i = 0
+
+        if self.opt.task == 'sl':  # use token labels
+            label_field = 'seq_outs'
+        elif self.opt.task == 'sc':  # use sentence labels
+            label_field = 'labels'
+        elif self.opt.task == 'slu':  # use sentence labels and token labels
+            label_field = 'slu_labels'
+        else:
+            raise ValueError('Wrong task in args: {}!'.format(self.opt.task))
 
         total_data = len(data_part['labels'])
         while len(query_set['labels']) < self.opt.query_shot and len(query_set['labels']) < total_data:
             d_id = idxes[i]
-            s_in, s_out, lb = data_part['seq_ins'][d_id], data_part['seq_outs'][d_id], data_part['labels'][d_id]
-            if set(lb) & set(label_set):  # select data contain current label set
+            s_in, s_out, lb, slu_lb = data_part['seq_ins'][d_id], data_part['seq_outs'][d_id], data_part['labels'][d_id], data_part['slu_labels'][d_id]
+            org_lb = data_part[label_field][d_id]
+            if set(org_lb) & set(label_set):  # select data contain current label set
                 if self.opt.way > 0:  # remove non-label_set labels
-                    s_out, lb = self.remove_out_set_labels(s_out, lb, label_set)
-                self.add_data_to_set(query_set, s_in, s_out, lb)
-                if self.opt.check and (set(data_part['labels'][d_id]) - set(label_set)):
-                    print('Abandon labels:', set(data_part['labels'][d_id]) - set(label_set))
+                    s_out, lb, slu_lb = self.remove_out_set_labels(s_out, lb, slu_lb, label_set)
+                self.add_data_to_set(query_set, s_in, s_out, lb, slu_lb)
+                if self.opt.check and (set(data_part[label_field][d_id]) - set(label_set)):
+                    print('Abandon labels:', set(data_part[label_field][d_id]) - set(label_set))
             i += 1
         if self.opt.check:
-            selected_labels = itertools.chain.from_iterable(query_set['labels'])
+            # print('in query check...')
+            selected_labels = itertools.chain.from_iterable(query_set[label_field])
             diff = (set(selected_labels) - set(label_set))
             if diff:
                 print("Error: non-match label-set, \n excess: {}, \n lack: {}".format(
@@ -276,12 +342,13 @@ class MiniIncludeGenerator(DataGeneratorBase):
             if label in shot_counts:
                 shot_counts[label] += 1
 
-    def add_data_to_set(self, data_set, s_in, s_out, lb):
+    def add_data_to_set(self, data_set, s_in, s_out, lb, slu_lb):
         data_set['seq_ins'].append(s_in)
         data_set['seq_outs'].append(s_out)
         data_set['labels'].append(lb)
+        data_set['slu_labels'].append(slu_lb)
 
-    def remove_out_set_labels(self, seq_out, lb, label_set):
+    def remove_out_set_labels(self, seq_out, lb, slu_lb, label_set):
         """ remove non-label set labels """
         if self.opt.task == 'sc':
             lb = list(set(lb) & set(label_set))
@@ -289,5 +356,9 @@ class MiniIncludeGenerator(DataGeneratorBase):
             for ind, lb in seq_out:
                 if lb != 'O' and lb not in label_set:
                     seq_out[ind] = 'O'
-        return seq_out, lb
+        elif self.opt.task == 'slu':
+            for ind, lb in slu_lb:
+                if not lb.endswith('-O') and lb not in label_set:
+                    slu_lb[ind] = lb.split('-')[0] + 'O'
+        return seq_out, lb, slu_lb
 

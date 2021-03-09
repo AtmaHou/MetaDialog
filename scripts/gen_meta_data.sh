@@ -9,7 +9,7 @@ dataset_lst=(smp)
 #dataset_lst=(atis stanford toursg)
 
 # ======= size setting ======
-support_shots_lst=(3)
+support_shots_lst=(1)
 #support_shots_lst=(5)
 episode_num=50  # We could over generation and select part of for each epoch
 query_shot=4
@@ -22,7 +22,9 @@ remove_rate=80
 # ====== general setting =====
 seed_lst=(0)
 
-task=sc
+#task=sc
+#task=sl
+task=slu
 
 #dup_query=--dup_query  # dup_query set empty to not allow duplication between query and support
 dup_query=
@@ -44,8 +46,10 @@ use_fix_support=--use_fix_support
 # ======= default path (for quick distribution) ==========
 #input_dir=/Users/lyk/Work/Dialogue/FewShot/SMP正式数据集/
 #output_dir=/Users/lyk/Work/Dialogue/FewShot/SMP正式数据集/SmpMetaData/
-input_dir=/Users/lyk/Work/Dialogue/FewShot/SMP/
-output_dir=/Users/lyk/Work/Dialogue/FewShot/SMP/smp2/
+input_dir=/Users/lyk/Work/Dialogue/FewShot/SMP/SMP_Final_Origin2
+output_dir=/Users/lyk/Work/Dialogue/FewShot/SMP/smp_final/
+
+now=$(date +%s)
 
 echo \[START\] set jobs on dataset \[ ${dataset_lst[@]} \]
 # === Loop for all case and run ===
@@ -73,7 +77,7 @@ do
         --split_basis ${split_basis} \
         --remove_rate ${remove_rate} \
         ${use_fix_support} \
-        --mark ${mark} ${dup_query} ${allow_override} ${check} > ${output_dir}${dataset}.spt_s_${support_shots}.q_s_${query_shot}.ep_${episode_num}${use_fix_support}.log
+        --mark ${mark} ${dup_query} ${allow_override} ${check} > ${output_dir}${dataset}.spt_s_${support_shots}.q_s_${query_shot}.ep_${episode_num}${use_fix_support}-${now}.log
     done
   done
 done

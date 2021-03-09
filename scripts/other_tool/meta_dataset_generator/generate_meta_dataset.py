@@ -46,9 +46,13 @@ def dump_data(opt, data):
     """
     output_dir = opt.output_dir
     print('Dump data to dir: ', output_dir)
-    dump_dir_name = "{}.{}.spt_s_{}.q_s_{}.ep_{}.lt_{}.ci_{}".format(
-        opt.dataset, opt.mark, opt.support_shots, opt.query_shot, opt.episode_num, opt.label_type, opt.eval_config_id
-    )
+    if opt.dataset == 'snips':
+        dump_dir_name = '{}.spt_s_{}.q_s_{}.ep_{}.cross_id_{}'.format(opt.dataset, opt.support_shots, opt.query_shot,
+                                                                      opt.episode_num, opt.eval_config_id)
+    else:
+        dump_dir_name = "{}.spt_s_{}.q_s_{}.ep_{}.cross_id_{}".format(
+            opt.dataset, opt.support_shots, opt.query_shot, opt.episode_num, opt.eval_config_id
+        )
 
     dump_path = os.path.join(output_dir, dump_dir_name)
 
@@ -177,7 +181,7 @@ def main():
                         help='Abandon labels with appear-times less than this value, to avoid useless support sample')
 
     # general setting
-    parser.add_argument("--task", default='sc', choices=['sl', 'sc'],
+    parser.add_argument("--task", default='sc', choices=['sl', 'sc', 'slu'],
                         help="Task: sl:sequence labeling, sc:single label sent classify")
     parser.add_argument("--mark", type=str, default=DEFAULT_ID, help="A special mark in output file name to distinguish.")
     parser.add_argument('--dup_query', action='store_true', help='allow duplication between query and support set.')
@@ -229,18 +233,32 @@ def main():
             print('Train: Few_shot_data gathered and start to dump data')
             few_shot_data_statistic(opt, train_meta_data)
 
-            """dev & test"""
+            """dev"""
             if opt.use_fix_support:
-                domains = raw_data['support'].keys()
+                domains = raw_data['dev']['support'].keys()
                 dev_meta_data = {}
                 for domain in domains:
-                    dev_meta_data[domain] = [{'support': raw_data['support'][domain], 'query': raw_data['dev'][domain]}]
+                    dev_meta_data[domain] = [{'support': raw_data['dev']['support'][domain],
+                                              'query': raw_data['dev']['query'][domain]}]
             else:
-                dev_meta_data = generator.gen_data(raw_data['dev'])
-
+                dev_meta_data = generator.gen_data(raw_data['dev']['query'])
             print('Dev: Few_shot_data gathered and start to dump data')
             few_shot_data_statistic(opt, dev_meta_data)
-            meta_data = {'train': train_meta_data, 'dev': dev_meta_data, 'test': dev_meta_data}
+
+            """test"""
+            if opt.use_fix_support:
+                domains = raw_data['test']['support'].keys()
+                test_meta_data = {}
+                for domain in domains:
+                    test_meta_data[domain] = [{'support': raw_data['test']['support'][domain],
+                                              'query': raw_data['test']['query'][domain]}]
+            else:
+                test_meta_data = generator.gen_data(raw_data['test']['query'])
+            print('Test: Few_shot_data gathered and start to dump data')
+            few_shot_data_statistic(opt, test_meta_data)
+
+            """meta data"""
+            meta_data = {'train': train_meta_data, 'dev': dev_meta_data, 'test': test_meta_data}
         else:
             meta_data = generator.gen_data(raw_data)
             print('Few_shot_data gathered and start to dump data')
