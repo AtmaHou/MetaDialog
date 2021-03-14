@@ -9,7 +9,7 @@ It also provides the baselines for:
 - [Benchmark Paper: "FewJoint: A Few-shot Learning Benchmark for Joint Language Understanding"]("https://arxiv.org/abs/2009.08138")
 
 ### Updates
-
+- Updates 2021.3.8: Fix wrong default setting for few-shot data generator scripts. 
 - Updates 2020.9.17: FewJoint benchmark (Dataset for SMP) is available: [paper](https://arxiv.org/abs/2009.08138), [data](https://atmahou.github.io/attachments/FewJoint.zip), [reformatted data (for MetaDialog)](https://atmahou.github.io/attachments/FewJoint_for_MetaDialog.zip)
 
 ### Features
