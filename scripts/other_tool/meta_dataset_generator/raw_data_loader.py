@@ -441,6 +441,7 @@ class SMPDataLoader(RawDataLoaderBase):
         seq_out = ['O'] * len(seq_in)
         if 'slots' in item:
             slots = item['slots']
+            all_slot_value_lst = []
             for slot_key, slot_value in slots.items():
                 if not isinstance(slot_value, list):
                     if isinstance(slot_value, dict):
@@ -449,17 +450,49 @@ class SMPDataLoader(RawDataLoaderBase):
                         slot_value = [(slot_key, slot_value)]
                 else:
                     slot_value = [(slot_key, s_val) for s_val in slot_value]
-                for (s_key, s_val) in slot_value:
-                    s_val = s_val.replace(' ', '')
-                    if s_val in text:
-                        s_idx = text.index(s_val)
-                        s_end = s_idx + len(s_val)
-                        seq_out[s_idx] = 'B-' + s_key
-                        for idx in range(s_idx + 1, s_end):
-                            seq_out[idx] = 'I-' + s_key
+                all_slot_value_lst.extend(slot_value)
+
+            # sort values, bigger first
+            all_slot_value_lst = sorted(all_slot_value_lst, key=lambda x: -len(x[1]))
+
+            for (s_key, s_val) in all_slot_value_lst:
+                s_val = s_val.replace(' ', '')
+                if s_val in text:
+                    # find all start index
+                    s_idx_lst = []
+                    start = -1
+                    while True:
+                        start = text.find(s_val, start + 1)
+                        if start == -1:
+                            break
+                        if set(seq_out[start:start + len(s_val)]) == set(['O']):
+                            s_idx_lst.append(start)
+                            # make sure the start index
+                    if len(s_idx_lst) == 1:
+                        s_idx = s_idx_lst[0]
                     else:
-                        print('text: {}'.format(text))
-                        print('  slot_key: {} - slot_value: {}'.format(s_key, s_val))
+                        print('s_idx_lst: {}'.format(s_idx_lst))
+                        print('\ttext: {}'.format(text))
+                        print('\tdomain: {}'.format(item['domain']))
+                        print('\tslot_values: {}'.format(all_slot_value_lst))
+                        if (item['domain'] == 'idiomsDict' and s_key == 'firstword') \
+                                or (item['domain'] == 'chineseZodiac' and s_key == 'order') \
+                                or (item['domain'] == 'chineseZodiac' and s_key == 'female') \
+                                or (item['domain'] == 'constellation' and s_key == 'female') \
+                                or (item['domain'] == 'stroke' and s_key == 'character') \
+                                or (item['domain'] == 'cookbook' and s_key == 'dishName') \
+                                or (item['domain'] == 'epg' and s_key == 'name'):
+                            s_idx = s_idx_lst[-1]
+                        else:
+                            s_idx = s_idx_lst[0]
+
+                    s_end = s_idx + len(s_val)
+                    seq_out[s_idx] = 'B-' + s_key
+                    for idx in range(s_idx + 1, s_end):
+                        seq_out[idx] = 'I-' + s_key
+                else:
+                    print('text: {}'.format(text))
+                    print('  slot_key: {} - slot_value: {}'.format(s_key, s_val))
 
         label = item['intent'] if 'intent' in item else 'O'
         if 'intent' not in item:
@@ -495,15 +528,13 @@ if __name__ == '__main__':
     smp_loader = SMPDataLoader(opt)
 
     smp_data = smp_loader.load_data(path=smp_path)
-    train_data, dev_data, support_data = smp_data['train'], smp_data['dev'], smp_data['support']
+    train_data, dev_data, test_data = smp_data['train'], smp_data['dev'], smp_data['test']
 
     print("train: smp domain number: {}".format(len(train_data)))
     print("train: all smp domain: {}".format(train_data.keys()))
     print("dev: smp domain number: {}".format(len(dev_data)))
     print("dev: all smp domain: {}".format(dev_data.keys()))
-    print("support: smp domain number: {}".format(len(support_data)))
-    print("support: all smp domain: {}".format(support_data.keys()))
-
-    print("support: {}".format(support_data))
+    print("test: smp domain number: {}".format(len(test_data)))
+    print("test: all smp domain: {}".format(test_data.keys()))
 
 
