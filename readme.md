@@ -174,3 +174,8 @@ The following are some key params for you to control the generation process:
 ## Acknowledgment
 
 The platform is developed by [HIT-SCIR](http://ir.hit.edu.cn/). If you have any question and advice for it, please contact us(Yutai Hou - [ythou@ir.hit.edu.cn]() or Yongkui Lai - [yklai@ir.hit.edu.cn]()).
+
+
+
+## License for code and data
+Apache License 2.0
