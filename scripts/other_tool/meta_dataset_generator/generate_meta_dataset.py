@@ -98,13 +98,13 @@ def split_eval_set_with_label(opt, raw_data):
     """ Both input and output are raw data format """
     try:
         # load config:
-        with open(opt.eval_labels, 'r') as reader:
+        with open(opt.eval_config, 'r') as reader:
             config = json.load(reader)
         # split labels
         train_data = {'seq_ins': [], 'labels': [], 'seq_outs': []}
         dev_data = {'seq_ins': [], 'labels': [], 'seq_outs': []}
         test_data = {'seq_ins': [], 'labels': [], 'seq_outs': []}
-        for old_domain_name, old_domain in raw_data:
+        for old_domain_name, old_domain in raw_data.items():
             for ind in range(len(old_domain['label'])):
                 seq_ins, seq_outs, labels = old_domain['seq_ins'][ind], old_domain['seq_outs'][ind], old_domain['labels'][ind]
                 # for label in labels:
